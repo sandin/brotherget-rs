@@ -201,6 +201,12 @@ fn setup_local_proxy(server: Server, stop_cond: Arc<(Mutex<bool>, Condvar)>) -> 
   }
 }
 
+async fn start_server(config: &Config) -> Result<()> {
+
+
+  Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
   let matches  = App::new("bget")
@@ -231,6 +237,10 @@ async fn main() -> Result<()> {
       process::exit(-1);
     }
   };
+
+  if url == "start_server" {
+    return start_server(&config).await;
+  }
 
   // Send HEAD request for range
   let (support_range, content_length) = head(url).await?;
