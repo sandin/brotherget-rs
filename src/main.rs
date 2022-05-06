@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::env;
 use std::thread;
-use std::process::{Command};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, Condvar};
 use error_chain::error_chain;
 use futures::future::join_all;
@@ -180,11 +180,12 @@ fn setup_local_proxy(server: Server, stop_cond: Arc<(Mutex<bool>, Condvar)>) -> 
         .arg("--password").arg(server.password.clone()) // e.g.: --password="mMVlD2/6lni6EX6l5Tx3khJcl7Y="
         .arg("--encrypt-method").arg(server.method.clone()) // e.g.: --encrypt-method="aes-256-gcm"
         .arg("--protocol").arg(server.protocol.clone()) // e.g.: --protocol=http
+        .stdout(Stdio::null()) // keep silent
+        .stderr(Stdio::null())
         .spawn()
         .expect("failed to spawn");
       //let status = child.wait();
       //println!("the command exited with: {}", status);
-      println!("start local proxy server at {}:{}", &server.local_address, server.local_port);
 
       // let's wait for master's call
       let (lock, cvar) = &*stop_cond;
@@ -259,7 +260,13 @@ async fn main() -> Result<()> {
     for server in config.servers {
       let end = if i != chunk_count - 1 { offset + chunk_size - 1 } else { offset + last_chunk_size - 1 };
       let proxy_url = match setup_local_proxy(server.clone(), Arc::clone(&stop_cond)) {
-        Ok(r) => r,     // local proxy server are ready to go
+        Ok(r) => { 
+          if !r.is_none() {
+            multi_progress.println(format!("start local proxy server at {}:{} => {}:{}",
+              &server.local_address, server.local_port, &server.server, server.server_port)).unwrap();
+          }
+          r
+        },     // local proxy server are ready to go
         Err(_e) => None // just ignore the error and do not use any proxy
       };
 
