@@ -29,6 +29,7 @@ url: https://golang.google.cn/dl/go1.18.1.src.tar.gz, content_length: 22834149, 
             "server_port": 8388,
             "password": "password",
             "method": "aes-256-gcm",
+            "protocol": "http",
             "local_address": "127.0.0.1",
             "local_port": 1080
         },
@@ -37,12 +38,33 @@ url: https://golang.google.cn/dl/go1.18.1.src.tar.gz, content_length: 22834149, 
             "server_port": 8389,
             "password": "password",
             "method": "aes-256-gcm",
+            "protocol": "http",
             "local_address": "127.0.0.1",
             "local_port": 1081
         }
     ]
 }
-
 ```
+
+
+## Server
+
+download `ssserver` from [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust/releases)
+
+start server:
+```
+$ ./ssserver --config config.json
+```
+
+config.json:
+```json
+{
+    "server": "0.0.0.0",
+    "server_port": 8383,
+    "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
+    "method": "aes-256-gcm"
+}
+```
+
 
             
