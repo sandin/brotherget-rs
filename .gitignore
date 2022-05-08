@@ -5,3 +5,5 @@
 *.zip
 *.tar.gz
 *.msi
+
+.DS_Store
