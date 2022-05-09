@@ -10,6 +10,7 @@ use libp2p::{
     core::upgrade,
     core::ConnectedPoint,
     core::multiaddr::{Protocol::P2p, multihash::Multihash},
+    identify::{Identify, IdentifyConfig, IdentifyEvent},
     kad::{record::store::MemoryStore, record::Key, AddProviderOk, Kademlia, KademliaEvent, PeerRecord, PutRecordOk, QueryResult, Quorum, Record},
     identity,
     mdns::{Mdns, MdnsEvent},
@@ -29,7 +30,7 @@ extern crate env_logger;
 const KEY_FILE: &'static str = "private.pk8";
 const BOOTNODE_PORT: u32 = 53308;
 const BOOTNODES: [&'static str; 1] = [
-    "/ip4/192.168.2.7/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa",
+    "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa",
 ];
 
 #[tokio::main]
@@ -82,19 +83,51 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .multiplex(mplex::MplexConfig::new())
         .boxed();
 
-    // Create a Kademlia behaviour.
-    let store = MemoryStore::new(local_peer_id);
-    let kademlia = Kademlia::new(local_peer_id, store);
+
+    #[derive(NetworkBehaviour)]
+    #[behaviour(out_event = "OutEvent")]
+    struct MyBehaviour {
+        kademlia: Kademlia<MemoryStore>,
+        //mdns: Mdns,
+        identity: Identify,
+    }
+
+    #[derive(Debug)]
+    enum OutEvent {
+        Identify(IdentifyEvent),
+        Kademlia(KademliaEvent),
+    }
+
+    impl From<IdentifyEvent> for OutEvent {
+        fn from(v: IdentifyEvent) -> Self {
+            Self::Identify(v)
+        }
+    }
+
+    impl From<KademliaEvent> for OutEvent {
+        fn from(v: KademliaEvent) -> Self {
+            Self::Kademlia(v)
+        }
+    }
 
     // Create a swarm to manage peers and events.
     let mut swarm = {
-        SwarmBuilder::new(transport, kademlia, local_peer_id)
-        // We want the connection background tasks to be spawned
-        // onto the tokio runtime.
-        .executor(Box::new(|fut| {
-            tokio::spawn(fut);
-        }))
-        .build()
+        // Create a Kademlia behaviour.
+        let store = MemoryStore::new(local_peer_id);
+        let kademlia = Kademlia::new(local_peer_id, store);
+        let identity = Identify::new(IdentifyConfig::new(
+            "/ipfs/0.1.0".into(),
+            id_keys.public(),
+        ));
+        let behaviour = MyBehaviour { kademlia, identity };
+
+        SwarmBuilder::new(transport, behaviour, local_peer_id)
+            // We want the connection background tasks to be spawned
+            // onto the tokio runtime.
+            .executor(Box::new(|fut| {
+                tokio::spawn(fut);
+            }))
+            .build()
     };
 
     // Read full lines from stdin
@@ -119,16 +152,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             continue; // DO NOT ADD MYSELF
         }
         println!("add boot addr {}", &addr);
-        swarm.behaviour_mut().add_address(&peer_id, multiaddr.clone());
+        swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr.clone());
     }
     if !is_boot_node {
-        swarm.behaviour_mut().bootstrap()?;
+        swarm.behaviour_mut().kademlia.bootstrap()?;
     }
 
     // Kick it off
     loop {
         tokio::select! {
-            line = stdin.next_line() => handle_input_line(&mut swarm.behaviour_mut(), line.expect("Stdin not to close").unwrap()),
+            line = stdin.next_line() => handle_input_line(&mut swarm.behaviour_mut().kademlia, line.expect("Stdin not to close").unwrap()),
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
@@ -141,7 +174,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             ConnectedPoint::Dialer { .. } => {},
                             ConnectedPoint::Listener { local_addr, send_back_addr } => { 
                                 println!("ConnectionEstablished, add_address peer {:?}, endpoint {:?}", peer_id, &send_back_addr);
-                                swarm.behaviour_mut().add_address(&peer_id, send_back_addr.clone()); 
+                                swarm.behaviour_mut().kademlia.add_address(&peer_id, send_back_addr.clone()); 
                             },
                         }
                         */
@@ -153,67 +186,94 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     },
                     SwarmEvent::Behaviour(message) => {
                         match message {
-                            KademliaEvent::RoutingUpdated { peer, is_new_peer, addresses, .. } => {
-                                println!("RoutingUpdated, peer {:?}, is_new_peer {:?}, addresses {:#?}", peer, is_new_peer, addresses);
+                            OutEvent::Identify(event) => {
+                                match event {
+                                    IdentifyEvent::Received {  peer_id, info } => {
+                                        println!("IdentifyEvent::Received, peer_id {:?}, info {:?}", peer_id, info);
+                                        if info.protocols.contains(&String::from("/ipfs/kad/1.0.0")) {
+                                            for addr in info.listen_addrs {
+                                                swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                                            }
+                                        }
+                                    },
+                                    IdentifyEvent::Sent {  peer_id } => {
+                                        println!("IdentifyEvent::Sent, peer_id {:?}", peer_id);
+                                    },
+                                    IdentifyEvent::Pushed {  peer_id } => {
+                                        println!("IdentifyEvent::Sent, peer_id {:?}", peer_id);
+                                    },
+                                    IdentifyEvent::Error {  peer_id, error } => {
+                                        println!("IdentifyEvent::Sent, peer_id {:?}, error {:?}", peer_id, error);
+                                    },
+                                    _ => {}
+                                }
                             },
-                            KademliaEvent::UnroutablePeer { peer } => {
-                                println!("UnroutablePeer, peer {:?}", peer);
-                            },
-                            KademliaEvent::RoutablePeer { peer, address } => {
-                                println!("RoutablePeer, peer {:?}, address {:?}", peer, address);
-                            },
-                            KademliaEvent::PendingRoutablePeer { peer, address } => {
-                                println!("PendingRoutablePeer, peer {:?}, address {:?}", peer, address);
-                            },
-
-                            KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
-                                QueryResult::GetProviders(Ok(ok)) => {
-                                    for peer in ok.providers {
-                                        println!(
-                                            "Peer {:?} provides key {:?}",
-                                            peer,
-                                            std::str::from_utf8(ok.key.as_ref()).unwrap()
-                                        );
-                                    }
+                            OutEvent::Kademlia(event) => {
+                                match event {
+                                    KademliaEvent::RoutingUpdated { peer, is_new_peer, addresses, .. } => {
+                                        println!("RoutingUpdated, peer {:?}, is_new_peer {:?}, addresses {:#?}", peer, is_new_peer, addresses);
+                                    },
+                                    KademliaEvent::UnroutablePeer { peer } => {
+                                        println!("UnroutablePeer, peer {:?}", peer);
+                                    },
+                                    KademliaEvent::RoutablePeer { peer, address } => {
+                                        println!("RoutablePeer, peer {:?}, address {:?}", peer, address);
+                                    },
+                                    KademliaEvent::PendingRoutablePeer { peer, address } => {
+                                        println!("PendingRoutablePeer, peer {:?}, address {:?}", peer, address);
+                                    },
+                    
+                                    KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
+                                        QueryResult::GetProviders(Ok(ok)) => {
+                                            for peer in ok.providers {
+                                                println!(
+                                                    "Peer {:?} provides key {:?}",
+                                                    peer,
+                                                    std::str::from_utf8(ok.key.as_ref()).unwrap()
+                                                );
+                                            }
+                                        }
+                                        QueryResult::GetProviders(Err(err)) => {
+                                            eprintln!("Failed to get providers: {:?}", err);
+                                        }
+                                        QueryResult::GetRecord(Ok(ok)) => {
+                                            for PeerRecord {
+                                                record: Record { key, value, .. },
+                                                ..
+                                            } in ok.records
+                                            {
+                                                println!(
+                                                    "Got record {:?} {:?}",
+                                                    std::str::from_utf8(key.as_ref()).unwrap(),
+                                                    std::str::from_utf8(&value).unwrap(),
+                                                );
+                                            }
+                                        }
+                                        QueryResult::GetRecord(Err(err)) => {
+                                            eprintln!("Failed to get record: {:?}", err);
+                                        }
+                                        QueryResult::PutRecord(Ok(PutRecordOk { key })) => {
+                                            println!(
+                                                "Successfully put record {:?}",
+                                                std::str::from_utf8(key.as_ref()).unwrap()
+                                            );
+                                        }
+                                        QueryResult::PutRecord(Err(err)) => {
+                                            eprintln!("Failed to put record: {:?}", err);
+                                        }
+                                        QueryResult::StartProviding(Ok(AddProviderOk { key })) => {
+                                            println!(
+                                                "Successfully put provider record {:?}",
+                                                std::str::from_utf8(key.as_ref()).unwrap()
+                                            );
+                                        }
+                                        QueryResult::StartProviding(Err(err)) => {
+                                            eprintln!("Failed to put provider record: {:?}", err);
+                                        }
+                                        _ => {}
+                                    },
+                                    _ => {}
                                 }
-                                QueryResult::GetProviders(Err(err)) => {
-                                    eprintln!("Failed to get providers: {:?}", err);
-                                }
-                                QueryResult::GetRecord(Ok(ok)) => {
-                                    for PeerRecord {
-                                        record: Record { key, value, .. },
-                                        ..
-                                    } in ok.records
-                                    {
-                                        println!(
-                                            "Got record {:?} {:?}",
-                                            std::str::from_utf8(key.as_ref()).unwrap(),
-                                            std::str::from_utf8(&value).unwrap(),
-                                        );
-                                    }
-                                }
-                                QueryResult::GetRecord(Err(err)) => {
-                                    eprintln!("Failed to get record: {:?}", err);
-                                }
-                                QueryResult::PutRecord(Ok(PutRecordOk { key })) => {
-                                    println!(
-                                        "Successfully put record {:?}",
-                                        std::str::from_utf8(key.as_ref()).unwrap()
-                                    );
-                                }
-                                QueryResult::PutRecord(Err(err)) => {
-                                    eprintln!("Failed to put record: {:?}", err);
-                                }
-                                QueryResult::StartProviding(Ok(AddProviderOk { key })) => {
-                                    println!(
-                                        "Successfully put provider record {:?}",
-                                        std::str::from_utf8(key.as_ref()).unwrap()
-                                    );
-                                }
-                                QueryResult::StartProviding(Err(err)) => {
-                                    eprintln!("Failed to put provider record: {:?}", err);
-                                }
-                                _ => {}
                             },
                             _ => {}
                         }
