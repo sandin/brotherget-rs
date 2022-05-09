@@ -14,6 +14,11 @@ name = "bp2p"
 path = "src/p2p.rs"
 required-features = ["p2p"]
 
+[[bin]]
+name = "bsss"
+path = "src/ssocks.rs"
+required-features = ["ss"]
+
 [dependencies]
 reqwest = { version = "0.11", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full"] }
@@ -25,8 +30,10 @@ serde_json = "1.0"
 libp2p = { version = "0.44.0", features = ["default", "tcp-tokio"], optional = true }
 log = "0.4.0"
 env_logger = "0.8.4"
+shadowsocks-service = { version = "1.14.3", features = ["full"], optional = true }
 
 [features]
-default = ["bget", "p2p"]
+default = ["bget", "p2p", "ss"]
 bget = [ ]
 p2p = ["dep:libp2p"]
+ss = ["dep:shadowsocks-service"]
