@@ -5,38 +5,39 @@ use tokio::fs::{File};
 use tokio::io::{AsyncReadExt};
 use crate::error::BError;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Server {
-  pub server: String,
-  pub server_port: i32,
-  pub password: String,
-  pub method: String,
-  pub protocol: String,
-  pub local_address: String,
-  pub local_port: i32,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProxyConfig {
+  pub local_port: u32,  // port of sslocal
+  pub server_port: u32, // port of ssserver
+  pub password: String, // password of sserver and sslocal
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Config {
-  pub servers: Vec<Server>, // TODO: change to  bootnodes
-
-  pub server_port: u32, // port of ssserver
-  pub password: String, // password of sserver and sslocal
-
+pub struct P2pConfig {
   pub peer_port: u32, // port of p2p
   pub key_file: Option<String>, // keyfile of p2p
   pub bootnodes: Vec<String>, // bootnodes of p2p
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Config {
+  pub proxy: ProxyConfig,
+  pub p2p: P2pConfig,
+}
+
 impl Default for Config {
   fn default() -> Self {
     Config {
-      servers: vec![],
-      server_port: 8383, 
-      password: String::from("foo!bar!"),
-      peer_port: 53308,
-      key_file: None,
-      bootnodes: vec![],
+      proxy: ProxyConfig {
+        local_port: 1081,
+        server_port: 8383, 
+        password: String::from("foo!bar!"),
+      },
+      p2p: P2pConfig {
+        peer_port: 53308,
+        key_file: None,
+        bootnodes: vec![],
+      }
     }
   }
 }
@@ -52,24 +53,13 @@ impl Config {
     let mut config_file = File::open(filename).await?;
     let mut buffer = Vec::new();
     let n: usize = config_file.read_to_end(&mut buffer).await?;
-    let mut config: Config = match serde_json::from_slice(&buffer[0..n]) {
+    let config: Config = match serde_json::from_slice(&buffer[0..n]) {
       Ok(r) => r,
       Err(_e) => {
         return Err(BError::Config(format!("Error: can not parse config file {}.", filename)));
       }
     };
 
-    // TODO: delete me
-    config.servers.insert(0, Server {
-      server: "127.0.0.1".to_string(),
-      server_port: 0,
-      password: "".to_string(),
-      method: "".to_string(),
-      protocol: "http".to_string(),
-      local_address: "127.0.0.1".to_string(),
-      local_port: 0,
-    });
-  
     Ok(config)
   }
 

@@ -2,10 +2,12 @@ use std::time::{Instant};
 use std::process;
 use std::sync::{Arc, Mutex, Condvar};
 use futures::future::join_all;
+use futures::future::select_all;
 use futures::future::{self, Either};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle, HumanBytes};
 use clap::{Arg, App, SubCommand};
 use tokio::signal;
+use tokio::sync::mpsc;
 
 mod error;
 mod proxy;
@@ -13,53 +15,60 @@ mod config;
 mod download;
 mod ssocks;
 mod p2p;
+mod event;
 
 use crate::error::BError;
-use crate::proxy::{setup_local_proxy, start_proxy_server};
+use crate::proxy::{start_proxy_server};
 use crate::config::Config;
 use crate::download::{DownloadRequest, head, download, merge_files};
 use crate::ssocks::{start_ssserver, start_sslocal};
 use crate::p2p::{join_p2p};
+use crate::event::{Event, EventBus};
 
 async fn start_server(config: Config) -> Result<(), BError> {
+  let event_bus = EventBus::new();
+
   // proxy server
-  let config_content = r#"
-  {
-      "server": "0.0.0.0",
-      "server_port": {server_port},
-      "password": "{password}",
-      "method": "aes-256-gcm"
-  }
-  "#;
-  // rust raw string literals do not support placeholder, use string replace instead
-  let config_content = config_content.replace("{server_port}", &config.server_port.to_string());  
-  let config_content = config_content.replace("{password}", &config.password);
-  let server = start_ssserver(Some(&config_content));
+  let proxy_handle = tokio::spawn(async move {
+    let config_content = r#"
+    {
+        "server": "0.0.0.0",
+        "server_port": {server_port},
+        "password": "{password}",
+        "method": "aes-256-gcm"
+    }
+    "#;
+    // rust raw string literals do not support placeholder, use string replace instead
+    let config_content = config_content.replace("{server_port}", &config.proxy.server_port.to_string());  
+    let config_content = config_content.replace("{password}", &config.proxy.password);
+    return start_ssserver(Some(&config_content)).await.or(Err(BError::Other(format!("Can not start proxy server"))));
+  });
 
   // p2p node
-  let peer_node = join_p2p(config.key_file, config.peer_port, config.bootnodes);
-  /*
-    tokio::spawn(async move {
-      println!("peer node");
-      join_p2p(config.key_file, config.peer_port, config.bootnodes).await;
-    });
-  */
+  let event_bus1 = event_bus.clone();
+  let p2p_handle = tokio::spawn(async move {
+    return join_p2p(config.p2p.key_file, config.p2p.peer_port, config.p2p.bootnodes, event_bus1).await.or(Err(BError::Other(format!("Can not start proxy server"))));
+  });
+  
+  println!("press Ctrl+C to stop");
+  let handles = vec![proxy_handle, p2p_handle];
+  //tokio::pin!(handles);
 
-  //let abort_signal = signal::ctrl_c();
-
-  //tokio::pin!(server);
-  //tokio::pin!(abort_signal);
-  //tokio::pin!(peer_node);
-
-  println!("parse Ctrl+C to stop");
+  let mut rx = event_bus.receiver;
+  let tx = event_bus.sender;
   loop {
     tokio::select! {
-      _ = server => {
-        println!("proxy server stoped!");
-        process::exit(0);
+      e = rx.recv() => {
+        match e.unwrap() {
+          Event::PeerReady => {
+
+          },
+          _ => {}
+        }
       },
-      _ = peer_node => {
-        println!("p2p exit!");
+      _ = select_all(handles) => {
+          println!("handles select all end");
+          process::exit(0);
       },
       _ = signal::ctrl_c() => {
         println!("exit by canceled");
@@ -71,7 +80,7 @@ async fn start_server(config: Config) -> Result<(), BError> {
 }
 
 async fn download_file(url: &str, config: Config) -> Result<(), BError> {
-  println!("download_file");
+  println!("download_file, url={}", url);
 
   Ok(())
 }
@@ -85,7 +94,7 @@ async fn main() -> Result<(), BError> {
     .arg(
       Arg::with_name("config")
           .long("config")
-          .takes_value(false)
+          .takes_value(true)
           .help("config json file"),
     )
     .arg(

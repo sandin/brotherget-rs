@@ -1,22 +1,15 @@
 {
-    "servers": [
-        {
-            "server": "10.11.246.46",
-            "server_port": 8383,
-            "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
-            "method": "aes-256-gcm",
-            "protocol": "http",
-            "local_address": "127.0.0.1",
-            "local_port": 1081
-        },
-        {
-            "server": "10.11.64.68",
-            "server_port": 8383,
-            "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
-            "method": "aes-256-gcm",
-            "protocol": "http",
-            "local_address": "127.0.0.1",
-            "local_port": 1082
-        }
-    ]
+    "proxy": {
+        "server": "0.0.0.0",
+        "server_port": 8383,
+        "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
+        "local_port": 1081
+    },
+    "p2p": {
+        "peer_port": 53308,
+        "key_file": "private.pk8",
+        "bootnodes": [
+            "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"
+        ]
+    }
 }

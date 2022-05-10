@@ -7,7 +7,6 @@ use reqwest::header::{ACCEPT_RANGES, CONTENT_LENGTH, RANGE};
 use reqwest::Response;
 use reqwest::StatusCode;
 use crate::error::BError;
-use crate::config::{Server};
 
 #[derive(Debug)]
 pub struct DownloadRequest {
@@ -15,8 +14,8 @@ pub struct DownloadRequest {
   pub range: (u64, u64),
   pub size: u64,
   pub filename: String,
-  pub proxy: Option<String>,
-  pub server: Server,
+  pub proxy_url: Option<String>,
+  pub proxy_name: String,
 }
 
 pub async fn download(request: DownloadRequest, _: MultiProgress, progress_bar: ProgressBar) -> Result<DownloadRequest, BError> {
@@ -24,10 +23,10 @@ pub async fn download(request: DownloadRequest, _: MultiProgress, progress_bar: 
 
   let mut builder = reqwest::Client::builder();
   let agent_name; 
-  if let Some(ref proxy_url) = request.proxy {
+  if let Some(ref proxy_url) = request.proxy_url {
     let proxy = reqwest::Proxy::all(proxy_url)?;
     builder = builder.proxy(proxy);
-    agent_name = format!("{}:{}", &request.server.server, request.server.server_port);
+    agent_name = format!("{}", &request.proxy_name);
   } else {
     agent_name = "localhost".to_string();
   }

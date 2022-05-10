@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::path::{Path};
 use clap::{Arg, App};
 use tokio::fs::{File};
+use tokio::sync::mpsc;
 use tokio::io::{self, AsyncBufReadExt};
 use futures::StreamExt;
 use libp2p::{
@@ -25,8 +26,35 @@ use libp2p::{
     PeerId,
     Transport,
 };
+use crate::event::{Event, EventBus};
 
-pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>) -> Result<(), Box<dyn Error>> {
+#[derive(NetworkBehaviour)]
+#[behaviour(out_event = "OutEvent")]
+struct MyBehaviour {
+    kademlia: Kademlia<MemoryStore>,
+    //mdns: Mdns,
+    identity: Identify, // see: https://github.com/libp2p/rust-libp2p/discussions/2447
+}
+
+#[derive(Debug)]
+enum OutEvent {
+    Identify(IdentifyEvent),
+    Kademlia(KademliaEvent),
+}
+
+impl From<IdentifyEvent> for OutEvent {
+    fn from(v: IdentifyEvent) -> Self {
+        Self::Identify(v)
+    }
+}
+
+impl From<KademliaEvent> for OutEvent {
+    fn from(v: KademliaEvent) -> Self {
+        Self::Kademlia(v)
+    }
+}
+
+pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
     let mut is_boot_node: bool = false;
 
     let id_keys = match keyfile {
@@ -60,33 +88,6 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
         .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
         .multiplex(mplex::MplexConfig::new())
         .boxed();
-
-
-    #[derive(NetworkBehaviour)]
-    #[behaviour(out_event = "OutEvent")]
-    struct MyBehaviour {
-        kademlia: Kademlia<MemoryStore>,
-        //mdns: Mdns,
-        identity: Identify,
-    }
-
-    #[derive(Debug)]
-    enum OutEvent {
-        Identify(IdentifyEvent),
-        Kademlia(KademliaEvent),
-    }
-
-    impl From<IdentifyEvent> for OutEvent {
-        fn from(v: IdentifyEvent) -> Self {
-            Self::Identify(v)
-        }
-    }
-
-    impl From<KademliaEvent> for OutEvent {
-        fn from(v: KademliaEvent) -> Self {
-            Self::Kademlia(v)
-        }
-    }
 
     // Create a swarm to manage peers and events.
     let mut swarm = {
@@ -133,32 +134,42 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
         swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr.clone());
     }
     if !is_boot_node {
-        swarm.behaviour_mut().kademlia.bootstrap()?;
+        //swarm.behaviour_mut().kademlia.bootstrap()?;
     }
 
-    println!("kick it off");
+    let mut rx = event_bus.receiver;
+    let tx = event_bus.sender;
+    //tokio::pin!(rx);
+
     // Kick it off
     loop {
         tokio::select! {
             line = stdin.next_line() => handle_input_line(&mut swarm.behaviour_mut().kademlia, line.expect("Stdin not to close").unwrap()),
+            event = rx.recv() => {
+                match event? {
+                    Event::StartProviding { key } => {
+                        swarm.behaviour_mut().kademlia.start_providing(Key::new(&key)).expect("Failed to start providing key");
+                    },
+                    Event::StopProviding { key } => {
+                        swarm.behaviour_mut().kademlia.stop_providing(&Key::new(&key));
+                    },
+                    Event::Put { key, value } => {
+                        swarm.behaviour_mut().kademlia.put_record(Record {
+                            key: Key::new(&key),
+                            value: value.as_bytes().to_vec(),
+                            publisher: None,
+                            expires: None,
+                        }, Quorum::One).expect("Failed to store record locally.");
+                    },
+                }
+            },
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         println!("Listening on {:?}", address);
+                        tx.send(Event::PeerReady {});
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
-                        //if is_boot_node {
-                        /*
-                        match endpoint {
-                            ConnectedPoint::Dialer { .. } => {},
-                            ConnectedPoint::Listener { local_addr, send_back_addr } => { 
-                                println!("ConnectionEstablished, add_address peer {:?}, endpoint {:?}", peer_id, &send_back_addr);
-                                swarm.behaviour_mut().kademlia.add_address(&peer_id, send_back_addr.clone()); 
-                            },
-                        }
-                        */
-                        //}
-                        // FIXME: need to get addr of peer_id, see: https://github.com/libp2p/rust-libp2p/discussions/2447
                     },
                     SwarmEvent::ConnectionClosed { peer_id, endpoint, ..} => {
                         //println!("ConnectionClosed, peer {:?}, endpoint {:?}", peer_id, endpoint);
@@ -261,9 +272,6 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                 }
             }
         }
-
-        println!("yield now");
-        tokio::task::yield_now().await;
     }
     //Ok(())
 }
@@ -293,7 +301,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ];
 
     let key_file = if matches.is_present("bootnode") { Some(key_file) } else { None };
-    join_p2p(key_file, bootnode_port, bootnodes.to_vec()).await?;
+    let (tx, mut rx) = mpsc::channel(32);
+    join_p2p(key_file, bootnode_port, bootnodes.to_vec(), rx).await?;
     Ok(())
 }
 

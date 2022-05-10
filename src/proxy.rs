@@ -5,8 +5,9 @@ use std::env;
 use std::thread;
 
 use crate::error::BError;
-use crate::config::{Config, Server};
+use crate::config::{Config};
 
+/*
 #[cfg(target_os = "windows")]
 const SSLOCAL_BIN: &str = "sslocal.exe";
 #[cfg(target_os = "macos")]
@@ -53,6 +54,7 @@ pub fn setup_local_proxy(server: Server, stop_cond: Arc<(Mutex<bool>, Condvar)>)
     Ok(None) // It's OK, not an error, just DO NOT use any proxy, e.g.: localhost
   }
 }
+*/
 
 
 pub async fn start_proxy_server(config: &Config) -> Result<(), BError> {
