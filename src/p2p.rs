@@ -1,3 +1,4 @@
+#[macro_use] 
 use std::error::Error;
 use std::str::FromStr;
 use std::path::{Path};
@@ -24,47 +25,24 @@ use libp2p::{
     PeerId,
     Transport,
 };
-#[macro_use] extern crate log;
-extern crate env_logger;
 
-const KEY_FILE: &'static str = "private.pk8";
-const BOOTNODE_PORT: u32 = 53308;
-const BOOTNODES: [&'static str; 1] = [
-    "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa",
-];
+pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>) -> Result<(), Box<dyn Error>> {
+    let mut is_boot_node: bool = false;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
-
-    let matches  = App::new("bp2p")
-    .version(env!("CARGO_PKG_VERSION"))
-    .arg(
-      Arg::with_name("bootnode")
-          .short("b")
-          .long("bootnode")
-          .takes_value(false)
-          .help("is bootnode"),
-    )
-    .arg(
-      Arg::with_name("peer").required(false).help("peer id")
-    )
-    .get_matches();
-
-    let is_boot_node: bool = matches.is_present("bootnode");
-
-    let id_keys = {
-        if is_boot_node && Path::new(KEY_FILE).exists() {
-            // use RSA keys
-            let mut bytes = std::fs::read("private.pk8").unwrap();
-            match identity::Keypair::rsa_from_pkcs8(&mut bytes) {
-                Ok(r) => r,
-                Err(_) => panic!("bad key file")
+    let id_keys = match keyfile {
+        Some(filename) => { // use RSA key file
+            if Path::new(&filename).exists() {
+                is_boot_node = true;
+                let mut bytes = std::fs::read(&filename).unwrap();
+                match identity::Keypair::rsa_from_pkcs8(&mut bytes) {
+                    Ok(r) => r,
+                    Err(_) => panic!("bad key file {}", &filename)
+                }
+            } else {
+                panic!("key file {} is not exists", &filename)
             }
-        } else {
-            // Create a random PeerId
-            identity::Keypair::generate_ed25519()
-        }
+        },
+        None => identity::Keypair::generate_ed25519() // Create a random PeerId
     };
     let local_peer_id = PeerId::from(id_keys.public());
     println!("Local peer id: {:?}", local_peer_id);
@@ -134,10 +112,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
     // Listen on all interfaces and whatever port the OS assigns
-    let local_port = if is_boot_node { BOOTNODE_PORT } else {0};
+    let local_port = if is_boot_node { port } else {0};
     swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", local_port).parse()?)?;
 
-    for addr in &BOOTNODES {
+    for addr in bootnodes {
         let mut multiaddr = Multiaddr::from_str(&addr)?;
         let hash: Multihash = match multiaddr.pop().unwrap() {
             P2p(m) => m,
@@ -158,6 +136,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         swarm.behaviour_mut().kademlia.bootstrap()?;
     }
 
+    println!("kick it off");
     // Kick it off
     loop {
         tokio::select! {
@@ -282,9 +261,41 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
+
+        println!("yield now");
+        tokio::task::yield_now().await;
     }
+    //Ok(())
 }
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
+    let matches  = App::new("bp2p")
+    .version(env!("CARGO_PKG_VERSION"))
+    .arg(
+      Arg::with_name("bootnode")
+          .short("b")
+          .long("bootnode")
+          .takes_value(false)
+          .help("is bootnode"),
+    )
+    .arg(
+      Arg::with_name("peer").required(false).help("peer id")
+    )
+    .get_matches();
+
+    let key_file: String = String::from("private.pk8");
+    let bootnode_port: u32 = 53308;
+    let bootnodes: Vec<String> = vec![
+        String::from("/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"),
+    ];
+
+    let key_file = if matches.is_present("bootnode") { Some(key_file) } else { None };
+    join_p2p(key_file, bootnode_port, bootnodes.to_vec()).await?;
+    Ok(())
+}
 
 fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String) {
     let mut args = line.split(' ');

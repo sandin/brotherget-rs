@@ -2,21 +2,114 @@ use std::time::{Instant};
 use std::process;
 use std::sync::{Arc, Mutex, Condvar};
 use futures::future::join_all;
+use futures::future::{self, Either};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle, HumanBytes};
-use clap::{Arg, App};
+use clap::{Arg, App, SubCommand};
+use tokio::signal;
 
 mod error;
 mod proxy;
 mod config;
 mod download;
+mod ssocks;
+mod p2p;
 
 use crate::error::BError;
 use crate::proxy::{setup_local_proxy, start_proxy_server};
-use crate::config::{parse_config_file, Config};
+use crate::config::Config;
 use crate::download::{DownloadRequest, head, download, merge_files};
+use crate::ssocks::{start_ssserver, start_sslocal};
+use crate::p2p::{join_p2p};
+
+async fn start_server(config: Config) -> Result<(), BError> {
+  // proxy server
+  let config_content = r#"
+  {
+      "server": "0.0.0.0",
+      "server_port": {server_port},
+      "password": "{password}",
+      "method": "aes-256-gcm"
+  }
+  "#;
+  // rust raw string literals do not support placeholder, use string replace instead
+  let config_content = config_content.replace("{server_port}", &config.server_port.to_string());  
+  let config_content = config_content.replace("{password}", &config.password);
+  let server = start_ssserver(Some(&config_content));
+
+  // p2p node
+  let peer_node = join_p2p(config.key_file, config.peer_port, config.bootnodes);
+  /*
+    tokio::spawn(async move {
+      println!("peer node");
+      join_p2p(config.key_file, config.peer_port, config.bootnodes).await;
+    });
+  */
+
+  //let abort_signal = signal::ctrl_c();
+
+  //tokio::pin!(server);
+  //tokio::pin!(abort_signal);
+  //tokio::pin!(peer_node);
+
+  println!("parse Ctrl+C to stop");
+  loop {
+    tokio::select! {
+      _ = server => {
+        println!("proxy server stoped!");
+        process::exit(0);
+      },
+      _ = peer_node => {
+        println!("p2p exit!");
+      },
+      _ = signal::ctrl_c() => {
+        println!("exit by canceled");
+        process::exit(0);
+      },
+    }
+  }
+  Ok(())
+}
+
+async fn download_file(url: &str, config: Config) -> Result<(), BError> {
+  println!("download_file");
+
+  Ok(())
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), BError> {
+  let matches  = App::new("bget")
+    .version(env!("CARGO_PKG_VERSION"))
+    .about("BrotherGet is a p2p downloader.")
+    .arg(
+      Arg::with_name("config")
+          .long("config")
+          .takes_value(false)
+          .help("config json file"),
+    )
+    .arg(
+      Arg::with_name("url").help("url")
+    )
+    .get_matches();
+
+  let config: Config = match matches.value_of("config") {
+    Some(filename) => Config::load_from_file(filename).await.expect(&format!("can not parse config file {}", filename)),
+    None => Config::default(),
+  };
+
+  match matches.value_of("url") {
+    Some(url) => download_file(url, config).await?,
+    None => start_server(config).await?,
+  };
+
+  Ok(())
+}
+
+
+/*
+
+async fn main1() -> Result<(), BError> {
   let matches  = App::new("bget")
     .version(env!("CARGO_PKG_VERSION"))
     .arg(
@@ -142,6 +235,8 @@ async fn main() -> Result<(), BError> {
 
   Ok(())
 }
+
+*/
 
 // refs:
 // https://rust-lang-nursery.github.io/rust-cookbook/web/clients/download.html

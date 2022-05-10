@@ -1,14 +1,12 @@
-#[macro_use] extern crate log;
-extern crate env_logger;
 use std::error::Error;
 use clap::{Arg, App};
 use shadowsocks_service::{run_server, create_local, config as SSConfig};
 
-async fn start_ssserver(config_file: Option<&str>) -> Result<(), Box<dyn Error>> {
+pub async fn start_ssserver(config_str: Option<&str>) -> Result<(), Box<dyn Error>> {
     println!("start_ssserver");
 
-    let config: SSConfig::Config = match config_file {
-        Some(filename) => SSConfig::Config::load_from_file(filename, SSConfig::ConfigType::Server).unwrap(),
+    let config: SSConfig::Config = match config_str {
+        Some(content) => SSConfig::Config::load_from_str(content, SSConfig::ConfigType::Server).unwrap(),
         None => { 
             let config_content = r#"
                 {
@@ -27,7 +25,7 @@ async fn start_ssserver(config_file: Option<&str>) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-async fn start_sslocal(config_file: Option<&str>) -> Result<(), Box<dyn Error>> {
+pub async fn start_sslocal(config_file: Option<&str>) -> Result<(), Box<dyn Error>> {
     println!("start_sslocal");
 
     let config: SSConfig::Config = match config_file {
@@ -56,7 +54,6 @@ async fn start_sslocal(config_file: Option<&str>) -> Result<(), Box<dyn Error>> 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
 
     let matches  = App::new("bsss")
     .version(env!("CARGO_PKG_VERSION"))
