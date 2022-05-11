@@ -1,6 +1,6 @@
 # Brother Get
 
-An HTTP downloader which can crack the intranet speed limit.
+BrotherGet is a P2P downloader.
 
 ## Usage
 
@@ -23,47 +23,27 @@ url: https://golang.google.cn/dl/go1.18.1.src.tar.gz, content_length: 22834149, 
 
 ```json
 {
-    "servers": [
-        {
-            "server": "127.0.0.1",
-            "server_port": 8388,
-            "password": "password",
-            "method": "aes-256-gcm",
-            "protocol": "http",
-            "local_address": "127.0.0.1",
-            "local_port": 1080
-        },
-        {
-            "server": "127.0.0.1",
-            "server_port": 8389,
-            "password": "password",
-            "method": "aes-256-gcm",
-            "protocol": "http",
-            "local_address": "127.0.0.1",
-            "local_port": 1081
-        }
-    ]
+    "proxy": {
+        "server": "0.0.0.0",
+        "server_port": 8383,
+        "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
+        "local_port": 1081
+    },
+    "p2p": {
+        "peer_port": 53308,
+        "key_file": "private.pk8",
+        "bootnodes": [
+            "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"
+        ]
+    }
 }
 ```
-
 
 ## Server
 
-download `ssserver` from [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust/releases)
-
 start server:
 ```
-$ ./ssserver --config config.json
-```
-
-config.json:
-```json
-{
-    "server": "0.0.0.0",
-    "server_port": 8383,
-    "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
-    "method": "aes-256-gcm"
-}
+$ bget start_server --config config.json
 ```
 
 

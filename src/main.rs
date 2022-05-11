@@ -158,6 +158,8 @@ async fn start_server(config: Config) -> Result<(), BError> {
 async fn download_file(url: &str, config: Config) -> Result<(), BError> {
   println!("download_file, url={}", url);
 
+  // TODO
+
   Ok(())
 }
 
@@ -168,7 +170,7 @@ async fn main() -> Result<(), BError> {
 
   let matches  = App::new("bget")
     .version(env!("CARGO_PKG_VERSION"))
-    .about("BrotherGet is a p2p downloader.")
+    .about("BrotherGet is a P2P downloader.")
     .arg(
       Arg::with_name("config")
           .long("config")
