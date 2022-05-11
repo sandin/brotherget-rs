@@ -8,21 +8,13 @@ mod ssocks;
 mod p2p;
 mod event;
 
-use std::time::{Instant};
 use std::process;
-use std::sync::{Arc, Mutex, Condvar};
-use std::sync::atomic::{AtomicU32, Ordering};
-use futures::future::join_all;
-use futures::future::select_all;
-use futures::future::{self, Either};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle, HumanBytes};
-use clap::{Arg, App, SubCommand};
+use clap::{Arg, App};
 use tokio::signal;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast::error::SendError;
 use env_logger;
 
 use crate::error::BError;
-use crate::proxy::{start_proxy_server};
 use crate::config::Config;
 use crate::download::{DownloadRequest, head, download, merge_files};
 use crate::ssocks::{start_ssserver, start_sslocal};
@@ -65,6 +57,10 @@ impl Context {
       && self.peer_id.is_some() && self.peer_addr.is_some() && self.peer_port.is_some()
   }
 
+  pub fn post_event(&self, event: Event) -> Result<usize, SendError<Event>> {
+    self.event_bus.sender.send(event)
+  }
+
 }
 
 async fn start_server(config: Config) -> Result<(), BError> {
@@ -99,13 +95,13 @@ async fn start_server(config: Config) -> Result<(), BError> {
 
   fn on_ready(context: &Context) {
     let proxy_url = format!("{}:{}", context.peer_addr.as_ref().unwrap(), context.proxy_port.unwrap());
-    context.event_bus.sender.send(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: proxy_url }).unwrap();
-    context.event_bus.sender.send(Event::StartProviding { key: String::from(BGET_SERVER_KEY) }).unwrap();
-    context.event_bus.sender.send(Event::GetProviders { key: String::from(BGET_SERVER_KEY) }).unwrap();
+    context.post_event(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: proxy_url }).unwrap();
+    context.post_event(Event::StartProviding { key: String::from(BGET_SERVER_KEY) }).unwrap();
+    context.post_event(Event::GetProviders { key: String::from(BGET_SERVER_KEY) }).unwrap();
   }
 
   fn on_exit(context: &Context) {
-    context.event_bus.sender.send(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: String::from("") }).unwrap();
+    context.post_event(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: String::from("") }).unwrap();
   }
 
   loop {
@@ -138,7 +134,7 @@ async fn start_server(config: Config) -> Result<(), BError> {
           Event::GetProvidersResult { key, providers } => {
             println!("found providers(key={}): {:#?}", &key, providers);
             for provider in providers {
-              context.event_bus.sender.send(Event::GetRecord { key: provider.clone() }).unwrap();
+              context.post_event(Event::GetRecord { key: provider.clone() }).unwrap();
             }
           },
           Event::GetRecordResult { key, value } => {
