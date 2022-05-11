@@ -1,0 +1,14 @@
+{
+    "proxy": {
+        "server": "0.0.0.0",
+        "server_port": 8384,
+        "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
+        "local_port": 1082
+    },
+    "p2p": {
+        "peer_port": 53309,
+        "bootnodes": [
+            "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"
+        ]
+    }
+}

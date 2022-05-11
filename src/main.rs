@@ -1,13 +1,4 @@
-use std::time::{Instant};
-use std::process;
-use std::sync::{Arc, Mutex, Condvar};
-use futures::future::join_all;
-use futures::future::select_all;
-use futures::future::{self, Either};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle, HumanBytes};
-use clap::{Arg, App, SubCommand};
-use tokio::signal;
-use tokio::sync::mpsc;
+extern crate log;
 
 mod error;
 mod proxy;
@@ -17,6 +8,19 @@ mod ssocks;
 mod p2p;
 mod event;
 
+use std::time::{Instant};
+use std::process;
+use std::sync::{Arc, Mutex, Condvar};
+use std::sync::atomic::{AtomicU32, Ordering};
+use futures::future::join_all;
+use futures::future::select_all;
+use futures::future::{self, Either};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle, HumanBytes};
+use clap::{Arg, App, SubCommand};
+use tokio::signal;
+use tokio::sync::mpsc;
+use env_logger;
+
 use crate::error::BError;
 use crate::proxy::{start_proxy_server};
 use crate::config::Config;
@@ -25,11 +29,50 @@ use crate::ssocks::{start_ssserver, start_sslocal};
 use crate::p2p::{join_p2p};
 use crate::event::{Event, EventBus};
 
+const BGET_SERVER_KEY: &'static str = "bget";
+
+#[derive(Debug, Clone)]
+struct Context {
+  event_bus: EventBus,
+
+  proxy_addr: Option<String>,
+  proxy_port: Option<u32>,
+
+  peer_id: Option<String>,
+  peer_addr: Option<String>,
+  peer_port: Option<u32>,
+}
+
+impl Default for Context {
+  fn default() -> Self {
+    Context {
+      event_bus: EventBus::new(),
+
+      proxy_addr: None,
+      proxy_port: None,
+
+      peer_id: None,
+      peer_addr: None,
+      peer_port: None,
+    }
+  }
+}
+
+impl Context {
+
+  pub fn is_ready(&self) -> bool {
+    self.proxy_addr.is_some() && self.proxy_port.is_some()
+      && self.peer_id.is_some() && self.peer_addr.is_some() && self.peer_port.is_some()
+  }
+
+}
+
 async fn start_server(config: Config) -> Result<(), BError> {
-  let event_bus = EventBus::new();
+  let context = Context::default();
 
   // proxy server
-  let proxy_handle = tokio::spawn(async move {
+  let event_bus1 = context.event_bus.clone();
+  tokio::spawn(async move {
     let config_content = r#"
     {
         "server": "0.0.0.0",
@@ -41,34 +84,68 @@ async fn start_server(config: Config) -> Result<(), BError> {
     // rust raw string literals do not support placeholder, use string replace instead
     let config_content = config_content.replace("{server_port}", &config.proxy.server_port.to_string());  
     let config_content = config_content.replace("{password}", &config.proxy.password);
-    return start_ssserver(Some(&config_content)).await.or(Err(BError::Other(format!("Can not start proxy server"))));
+    start_ssserver(Some(&config_content), event_bus1.clone()).await.unwrap();
+    event_bus1.sender.send(Event::ProxyStoped).unwrap();
   });
 
   // p2p node
-  let event_bus1 = event_bus.clone();
-  let p2p_handle = tokio::spawn(async move {
-    return join_p2p(config.p2p.key_file, config.p2p.peer_port, config.p2p.bootnodes, event_bus1).await.or(Err(BError::Other(format!("Can not start proxy server"))));
+  let event_bus2 = context.event_bus.clone();
+  tokio::spawn(async move {
+    join_p2p(config.p2p.key_file, config.p2p.peer_port, config.p2p.bootnodes, event_bus2.clone()).await.unwrap();
+    event_bus2.sender.send(Event::PeerStoped).unwrap();
   });
-  
-  println!("press Ctrl+C to stop");
-  let handles = vec![proxy_handle, p2p_handle];
-  //tokio::pin!(handles);
 
-  let mut rx = event_bus.receiver;
-  let tx = event_bus.sender;
+  tokio::pin!(context);
+
+  fn on_ready(context: &Context) {
+    let proxy_url = format!("{}:{}", context.peer_addr.as_ref().unwrap(), context.proxy_port.unwrap());
+    context.event_bus.sender.send(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: proxy_url }).unwrap();
+    context.event_bus.sender.send(Event::StartProviding { key: String::from(BGET_SERVER_KEY) }).unwrap();
+    context.event_bus.sender.send(Event::GetProviders { key: String::from(BGET_SERVER_KEY) }).unwrap();
+  }
+
+  fn on_exit(context: &Context) {
+    context.event_bus.sender.send(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: String::from("") }).unwrap();
+  }
+
   loop {
     tokio::select! {
-      e = rx.recv() => {
+      e = context.event_bus.receiver.recv() => {
         match e.unwrap() {
-          Event::PeerReady => {
-
+          Event::PeerStarted { peer_id, addr, port } => {
+            println!("peer is ready, addr={}, port={}", addr, port);
+            println!("press Ctrl+C to stop");
+            context.peer_id = Some(peer_id);
+            context.peer_addr = Some(addr);
+            context.peer_port = Some(port);
+            if context.is_ready() {
+              on_ready(&context);
+            }
+          },
+          Event::ProxyStarted { addr, port } => {
+            println!("proxy is ready, addr={}, port={}", addr, port);
+            context.proxy_addr = Some(addr);
+            context.proxy_port = Some(port);
+            if context.is_ready() {
+              on_ready(&context);
+            }
+          },
+          Event::PeerStoped | Event::ProxyStoped => {
+            println!("peer/proxy stoped");
+            on_exit(&context);
+            process::exit(0);
+          },
+          Event::GetProvidersResult { key, providers } => {
+            println!("found providers(key={}): {:#?}", &key, providers);
+            for provider in providers {
+              context.event_bus.sender.send(Event::GetRecord { key: provider.clone() }).unwrap();
+            }
+          },
+          Event::GetRecordResult { key, value } => {
+            println!("found record: peer_id={}, proxy_url={}", &key, &value);
           },
           _ => {}
         }
-      },
-      _ = select_all(handles) => {
-          println!("handles select all end");
-          process::exit(0);
       },
       _ = signal::ctrl_c() => {
         println!("exit by canceled");
@@ -76,7 +153,6 @@ async fn start_server(config: Config) -> Result<(), BError> {
       },
     }
   }
-  Ok(())
 }
 
 async fn download_file(url: &str, config: Config) -> Result<(), BError> {
@@ -88,6 +164,8 @@ async fn download_file(url: &str, config: Config) -> Result<(), BError> {
 
 #[tokio::main]
 async fn main() -> Result<(), BError> {
+  env_logger::init();
+
   let matches  = App::new("bget")
     .version(env!("CARGO_PKG_VERSION"))
     .about("BrotherGet is a p2p downloader.")

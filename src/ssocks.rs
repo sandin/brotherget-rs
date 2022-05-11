@@ -1,8 +1,9 @@
 use std::error::Error;
 use clap::{Arg, App};
 use shadowsocks_service::{run_server, create_local, config as SSConfig};
+use crate::event::{EventBus, Event};
 
-pub async fn start_ssserver(config_str: Option<&str>) -> Result<(), Box<dyn Error>> {
+pub async fn start_ssserver(config_str: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
     println!("start_ssserver");
 
     let config: SSConfig::Config = match config_str {
@@ -21,11 +22,15 @@ pub async fn start_ssserver(config_str: Option<&str>) -> Result<(), Box<dyn Erro
     };
 
     println!("proxy server listen at {:#?}", config.server[0].addr());
+    event_bus.sender.send(Event::ProxyStarted { 
+        addr: config.server[0].addr().host(),
+        port: config.server[0].addr().port() as u32 
+    }).unwrap();
     run_server(config).await?;
     Ok(())
 }
 
-pub async fn start_sslocal(config_file: Option<&str>) -> Result<(), Box<dyn Error>> {
+pub async fn start_sslocal(config_file: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
     println!("start_sslocal");
 
     let config: SSConfig::Config = match config_file {
@@ -69,12 +74,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .get_matches();
 
+    let event_bus = EventBus::new();
     match matches.value_of("mode") {
         Some("server") => {
-            start_ssserver(matches.value_of("config")).await?;
+            start_ssserver(matches.value_of("config"), event_bus.clone()).await?;
         },
         Some("client") => {
-            start_sslocal(matches.value_of("config")).await?;
+            start_sslocal(matches.value_of("config"), event_bus.clone()).await?;
         },
         Some(&_) | None => {
             eprintln!("unknown mode");

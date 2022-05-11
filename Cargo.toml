@@ -9,15 +9,15 @@ edition = "2021"
 name = "bget"
 path = "src/main.rs"
 
-[[bin]]
-name = "bp2p"
-path = "src/p2p.rs"
-required-features = ["p2p"]
+#[[bin]]
+#name = "bp2p"
+#path = "src/p2p.rs"
+#required-features = ["p2p"]
 
-[[bin]]
-name = "bsss"
-path = "src/ssocks.rs"
-required-features = ["ss"]
+#[[bin]]
+#name = "bsss"
+#path = "src/ssocks.rs"
+#required-features = ["ss"]
 
 [dependencies]
 reqwest = { version = "0.11", features = ["json", "stream"] }

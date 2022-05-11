@@ -63,4 +63,7 @@ impl Config {
     Ok(config)
   }
 
+  pub fn is_bootnode(&self) -> bool {
+    self.p2p.key_file.is_some()
+  }
 }

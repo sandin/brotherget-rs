@@ -2,6 +2,7 @@
 use std::error::Error;
 use std::str::FromStr;
 use std::path::{Path};
+use std::net::Ipv4Addr;
 use clap::{Arg, App};
 use tokio::fs::{File};
 use tokio::sync::mpsc;
@@ -11,7 +12,7 @@ use libp2p::{
     swarm::NetworkBehaviour,
     core::upgrade,
     core::ConnectedPoint,
-    core::multiaddr::{Protocol::P2p, multihash::Multihash},
+    core::multiaddr::{Protocol::P2p,  Protocol, multihash::Multihash},
     identify::{Identify, IdentifyConfig, IdentifyEvent},
     kad::{record::store::MemoryStore, record::Key, AddProviderOk, Kademlia, KademliaEvent, PeerRecord, PutRecordOk, QueryResult, Quorum, Record},
     identity,
@@ -26,6 +27,8 @@ use libp2p::{
     PeerId,
     Transport,
 };
+use log;
+use env_logger;
 use crate::event::{Event, EventBus};
 
 #[derive(NetworkBehaviour)]
@@ -73,7 +76,7 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
         None => identity::Keypair::generate_ed25519() // Create a random PeerId
     };
     let local_peer_id = PeerId::from(id_keys.public());
-    println!("Local peer id: {:?}", local_peer_id);
+    log::debug!("Local peer id: {:?}", local_peer_id);
 
     // Create a keypair for authenticated encryption of the transport.
     let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
@@ -127,10 +130,10 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
             Err(h) => panic!("bad boot node multiaddr hash") ,
         };
         if peer_id == local_peer_id {
-            println!("is bootnode, addr {}", &addr);
+            log::debug!("is bootnode, addr {}", &addr);
             continue; // DO NOT ADD MYSELF
         }
-        println!("add boot addr {}", &addr);
+        log::debug!("add boot addr {}", &addr);
         swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr.clone());
     }
     if !is_boot_node {
@@ -153,7 +156,7 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                     Event::StopProviding { key } => {
                         swarm.behaviour_mut().kademlia.stop_providing(&Key::new(&key));
                     },
-                    Event::Put { key, value } => {
+                    Event::PutRecord { key, value } => {
                         swarm.behaviour_mut().kademlia.put_record(Record {
                             key: Key::new(&key),
                             value: value.as_bytes().to_vec(),
@@ -161,25 +164,55 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                             expires: None,
                         }, Quorum::One).expect("Failed to store record locally.");
                     },
+                    Event::GetRecord { key } => {
+                        swarm.behaviour_mut().kademlia.get_record(Key::new(&key), Quorum::One);
+                    },
+                    Event::GetProviders { key } => {
+                        swarm.behaviour_mut().kademlia.get_providers(Key::new(&key));
+                    },
+                    _ => {},
                 }
             },
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        println!("Listening on {:?}", address);
-                        tx.send(Event::PeerReady {});
+                        log::debug!("Listening on {:?}", address);
+                        let mut ip: Option<String> = None;
+                        let mut port: Option<u32> = None;
+                        let mut is_loopback = false;
+                        for addr in address.iter() {
+                            match addr {
+                                Protocol::Ip4(ipv4_addr) => {
+                                    if ipv4_addr.is_loopback() {
+                                        is_loopback = true;
+                                    }
+                                    ip = Some(ipv4_addr.to_string());
+                                },
+                                Protocol::Tcp(p) => {
+                                    port = Some(p as u32);
+                                }
+                                _ => {},
+                            }
+                        }
+                        if !is_loopback && ip.is_some() && port.is_some() {
+                            tx.send(Event::PeerStarted { 
+                                peer_id: local_peer_id.to_string(),
+                                addr: ip.unwrap(),
+                                port: port.unwrap() 
+                            }).unwrap();
+                        }
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, ..} => {
                     },
                     SwarmEvent::ConnectionClosed { peer_id, endpoint, ..} => {
-                        //println!("ConnectionClosed, peer {:?}, endpoint {:?}", peer_id, endpoint);
+                        log::debug!("ConnectionClosed, peer {:?}, endpoint {:?}", peer_id, endpoint);
                     },
                     SwarmEvent::Behaviour(message) => {
                         match message {
                             OutEvent::Identify(event) => {
                                 match event {
                                     IdentifyEvent::Received {  peer_id, info } => {
-                                        println!("IdentifyEvent::Received, peer_id {:?}, info {:?}", peer_id, info);
+                                        log::debug!("IdentifyEvent::Received, peer_id {:?}, info {:?}", peer_id, info);
                                         if info.protocols.contains(&String::from("/ipfs/kad/1.0.0")) {
                                             for addr in info.listen_addrs {
                                                 swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
@@ -187,13 +220,13 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                                         }
                                     },
                                     IdentifyEvent::Sent {  peer_id } => {
-                                        println!("IdentifyEvent::Sent, peer_id {:?}", peer_id);
+                                        log::debug!("IdentifyEvent::Sent, peer_id {:?}", peer_id);
                                     },
                                     IdentifyEvent::Pushed {  peer_id } => {
-                                        println!("IdentifyEvent::Sent, peer_id {:?}", peer_id);
+                                        log::debug!("IdentifyEvent::Sent, peer_id {:?}", peer_id);
                                     },
                                     IdentifyEvent::Error {  peer_id, error } => {
-                                        println!("IdentifyEvent::Sent, peer_id {:?}, error {:?}", peer_id, error);
+                                        eprintln!("IdentifyEvent::Sent, peer_id {:?}, error {:?}", peer_id, error);
                                     },
                                     _ => {}
                                 }
@@ -201,27 +234,33 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                             OutEvent::Kademlia(event) => {
                                 match event {
                                     KademliaEvent::RoutingUpdated { peer, is_new_peer, addresses, .. } => {
-                                        println!("RoutingUpdated, peer {:?}, is_new_peer {:?}, addresses {:#?}", peer, is_new_peer, addresses);
+                                        log::debug!("RoutingUpdated, peer {:?}, is_new_peer {:?}, addresses {:#?}", peer, is_new_peer, addresses);
                                     },
                                     KademliaEvent::UnroutablePeer { peer } => {
-                                        println!("UnroutablePeer, peer {:?}", peer);
+                                        log::debug!("UnroutablePeer, peer {:?}", peer);
                                     },
                                     KademliaEvent::RoutablePeer { peer, address } => {
-                                        println!("RoutablePeer, peer {:?}, address {:?}", peer, address);
+                                        log::debug!("RoutablePeer, peer {:?}, address {:?}", peer, address);
                                     },
                                     KademliaEvent::PendingRoutablePeer { peer, address } => {
-                                        println!("PendingRoutablePeer, peer {:?}, address {:?}", peer, address);
+                                        log::debug!("PendingRoutablePeer, peer {:?}, address {:?}", peer, address);
                                     },
                     
                                     KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
                                         QueryResult::GetProviders(Ok(ok)) => {
+                                            let mut providers: Vec<String> = vec![]; 
                                             for peer in ok.providers {
-                                                println!(
+                                                log::debug!(
                                                     "Peer {:?} provides key {:?}",
                                                     peer,
                                                     std::str::from_utf8(ok.key.as_ref()).unwrap()
                                                 );
+                                                providers.push(peer.to_string());
                                             }
+                                            tx.send(Event::GetProvidersResult {
+                                                key: String::from_utf8(ok.key.to_vec()).unwrap(),
+                                                providers: providers,
+                                            }).unwrap();
                                         }
                                         QueryResult::GetProviders(Err(err)) => {
                                             eprintln!("Failed to get providers: {:?}", err);
@@ -232,18 +271,22 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                                                 ..
                                             } in ok.records
                                             {
-                                                println!(
+                                                log::debug!(
                                                     "Got record {:?} {:?}",
                                                     std::str::from_utf8(key.as_ref()).unwrap(),
                                                     std::str::from_utf8(&value).unwrap(),
                                                 );
+                                                tx.send(Event::GetRecordResult {
+                                                    key: String::from_utf8(key.to_vec()).unwrap(),
+                                                    value: String::from_utf8(value.to_vec()).unwrap(),
+                                                }).unwrap();
                                             }
                                         }
                                         QueryResult::GetRecord(Err(err)) => {
                                             eprintln!("Failed to get record: {:?}", err);
                                         }
                                         QueryResult::PutRecord(Ok(PutRecordOk { key })) => {
-                                            println!(
+                                            log::debug!(
                                                 "Successfully put record {:?}",
                                                 std::str::from_utf8(key.as_ref()).unwrap()
                                             );
@@ -252,7 +295,7 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                                             eprintln!("Failed to put record: {:?}", err);
                                         }
                                         QueryResult::StartProviding(Ok(AddProviderOk { key })) => {
-                                            println!(
+                                            log::debug!(
                                                 "Successfully put provider record {:?}",
                                                 std::str::from_utf8(key.as_ref()).unwrap()
                                             );
@@ -301,8 +344,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ];
 
     let key_file = if matches.is_present("bootnode") { Some(key_file) } else { None };
-    let (tx, mut rx) = mpsc::channel(32);
-    join_p2p(key_file, bootnode_port, bootnodes.to_vec(), rx).await?;
+    let event_bus = EventBus::new();
+    join_p2p(key_file, bootnode_port, bootnodes.to_vec(), event_bus.clone()).await?;
     Ok(())
 }
 
