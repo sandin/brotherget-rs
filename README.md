@@ -19,26 +19,6 @@ url: https://golang.google.cn/dl/go1.18.1.src.tar.gz, content_length: 22834149, 
 [eta 00:00:14] ###-------------------------------------  288252/4566829 6  % 285.70 KiB/s range=18267320-22834148 
 ```
 
-## Config
-
-```json
-{
-    "proxy": {
-        "server": "0.0.0.0",
-        "server_port": 8383,
-        "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
-        "local_port": 1081
-    },
-    "p2p": {
-        "peer_port": 53308,
-        "key_file": "private.pk8",
-        "bootnodes": [
-            "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"
-        ]
-    }
-}
-```
-
 ## Server
 
 start server:
@@ -46,5 +26,37 @@ start server:
 $ bget start_server --config config.json
 ```
 
+## Config
+
+peer node:
+```json
+{
+    "proxy": {
+        "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
+    },
+    "p2p": {
+        "bootnodes": [
+            "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"
+        ]
+    }
+}
+```
+
+
+boot node:
+```json
+{
+    "proxy": {
+        "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
+    },
+    "p2p": {
+        "peer_port": 53308,          
+        "key_file": "private.pk8",
+        "bootnodes": [
+            "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"
+        ]
+    }
+}
+```
 
             

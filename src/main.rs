@@ -17,7 +17,7 @@ use env_logger;
 use crate::error::BError;
 use crate::config::Config;
 use crate::download::{DownloadRequest, head, download, merge_files};
-use crate::ssocks::{start_ssserver, start_sslocal};
+use crate::ssocks::{start_ssserver, start_sslocal, get_random_available_port};
 use crate::p2p::{join_p2p};
 use crate::event::{Event, EventBus};
 
@@ -78,7 +78,11 @@ async fn start_server(config: Config) -> Result<(), BError> {
     }
     "#;
     // rust raw string literals do not support placeholder, use string replace instead
-    let config_content = config_content.replace("{server_port}", &config.proxy.server_port.to_string());  
+    let mut port = config.proxy.server_port;
+    if port == 0 {
+        port = get_random_available_port().await.unwrap();
+    }
+    let config_content = config_content.replace("{server_port}", &port.to_string());  
     let config_content = config_content.replace("{password}", &config.proxy.password);
     start_ssserver(Some(&config_content), event_bus1.clone()).await.unwrap();
     event_bus1.sender.send(Event::ProxyStoped).unwrap();

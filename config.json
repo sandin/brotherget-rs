@@ -1,9 +1,9 @@
 {
     "proxy": {
         "server": "0.0.0.0",
-        "server_port": 8383,
+        "server_port": 0,
         "password": "mMVlD2/6lni6EX6l5Tx3khJcl7Y=",
-        "local_port": 1081
+        "local_port": 0
     },
     "p2p": {
         "peer_port": 53308,

@@ -1,7 +1,14 @@
 use std::error::Error;
 use clap::{Arg, App};
+use tokio::net::TcpListener;
 use shadowsocks_service::{run_server, create_local, config as SSConfig};
 use crate::event::{EventBus, Event};
+
+pub async fn get_random_available_port() -> Result<u32, Box<dyn Error>> {
+    let listener = TcpListener::bind("0.0.0.0:0").await?;
+    let port = listener.local_addr()?.port() as u32;
+    Ok(port)
+}
 
 pub async fn start_ssserver(config_str: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
     println!("start_ssserver");
@@ -24,7 +31,7 @@ pub async fn start_ssserver(config_str: Option<&str>, event_bus: EventBus) -> Re
     println!("proxy server listen at {:#?}", config.server[0].addr());
     event_bus.sender.send(Event::ProxyStarted { 
         addr: config.server[0].addr().host(),
-        port: config.server[0].addr().port() as u32 
+        port: config.server[0].addr().port() as u32, 
     }).unwrap();
     run_server(config).await?;
     Ok(())
