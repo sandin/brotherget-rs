@@ -19,7 +19,7 @@ use crate::error::BError;
 use crate::config::Config;
 use crate::download::{download_file};
 use crate::ssocks::{start_ssserver, start_sslocal, get_random_available_port};
-use crate::p2p::{join_p2p, find_providers, BGET_SERVER_KEY};
+use crate::p2p::{join_p2p, find_remove_proxies, BGET_SERVER_KEY};
 use crate::event::{Event, EventBus};
 
 #[derive(Debug, Clone)]
@@ -185,13 +185,14 @@ async fn download_url(url: String, config: Config) -> Result<(), BError> {
     ..Default::default()
   };
 
-  // find proxy servers by p2p network
+  // finding peers that provide proxy services on a private P2P network,
+  // these brothers will share their bandwidth to speed up our downloads.
   let timeout = Duration::from_secs(5 * 60);
-  let remote_proxies: Vec<String> = find_providers(config.p2p.key_file, config.p2p.peer_port, config.p2p.bootnodes, timeout).await.unwrap();
+  let remote_proxies: Vec<String> = find_remove_proxies(config.p2p.key_file, config.p2p.peer_port, config.p2p.bootnodes, timeout).await.unwrap();
   println!("found proxies: {:#?}", remote_proxies);
 
-  // use `sslocal` to connect each proxy server(power by `ssserver`)
-  // (and start local http proxy)
+  // use `sslocal` to connect to each proxy servers that use `ssserver`
+  // running on the brother peers, and run http/socks5 proxy locally.
   let mut local_proxy_handles = vec![];
   for proxy_addr in remote_proxies.iter() {
     let mut sslocal_config = config.proxy.clone();

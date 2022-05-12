@@ -19,6 +19,7 @@ pub struct DownloadRequest {
   pub proxy_url: Option<String>,
   pub proxy_name: String,
 }
+type DownloadResponse = DownloadRequest;
 
 pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, BError> {
   let multi_progress = MultiProgress::new();
@@ -35,7 +36,7 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
   // Send HEAD request for range
   let mut requestes: Vec<DownloadRequest> = vec![];
   let (support_range, content_length) = head(url.clone()).await?;
-  if support_range {
+  if support_range && proxies.len() > 0 {
     let chunk_count: u32 = proxies.len() as u32;
     let chunk_size: u64 = (content_length as f64 / chunk_count as f64).ceil() as u64;
     let last_chunk_size: u64 = if content_length % chunk_size == 0 { chunk_size } else { content_length % chunk_size };
@@ -48,8 +49,8 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
 
     let mut offset = 0;
     let mut i = 0;
-    let end = if i != chunk_count - 1 { offset + chunk_size - 1 } else { offset + last_chunk_size - 1 };
     for proxy in proxies {
+      let end = if i != chunk_count - 1 { offset + chunk_size - 1 } else { offset + last_chunk_size - 1 };
       requestes.push(DownloadRequest {
         url: url.to_string(),
         range: Some((offset, end)),
@@ -74,12 +75,11 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
     });
   }
 
-  let mut handles = vec![];
-
   // Send GET requests for file
   multi_progress.println("start downloading...").unwrap();
   let start = Instant::now();
  
+  let mut handles = vec![];
   for request in requestes {
     let progress_bar = multi_progress.add(ProgressBar::new(request.size));
     progress_bar.set_style(progress_style.clone());
@@ -90,9 +90,9 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
   
   // Let's wait
   let res = join_all(handles).await;
-  let mut responses: Vec<DownloadRequest> = vec![]; // typedef DownloadRequest DownloadResponse
+  let mut responses: Vec<DownloadResponse> = vec![];
   for item in res {
-    let result: std::result::Result<DownloadRequest, BError> = item?;
+    let result: Result<DownloadResponse, BError> = item?;
     match result {
       Ok(r) => responses.push(r),
       Err(e) => println!("{:#?}", e),
@@ -132,10 +132,8 @@ pub async fn download_partial(request: DownloadRequest, _: MultiProgress, progre
     }
   };
 
-  let mut support_range = false;
   let request_builder = match request.range {
     Some(range) => {
-      support_range = true;
       progress_bar.set_message(format!("{} {}-{}", agent_name, range.0, range.1));
       client.get(&request.url).header(RANGE, format!("bytes={}-{}", range.0, range.1))
     },
@@ -147,7 +145,7 @@ pub async fn download_partial(request: DownloadRequest, _: MultiProgress, progre
 
   let response: Response = request_builder.send().await?;
   let status = response.status();
-  if status != StatusCode::OK || (support_range && status != StatusCode::PARTIAL_CONTENT) {
+  if !(status == StatusCode::OK || status == StatusCode::PARTIAL_CONTENT) {
     return Err(BError::Download(format!("Unexpected server response: {}", status)));
   }
   //println!("response headers={:#?}", response.headers());

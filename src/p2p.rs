@@ -62,7 +62,7 @@ impl From<KademliaEvent> for OutEvent {
     }
 }
 
-pub async fn find_providers(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<String>, Box<dyn Error>> {
+pub async fn find_remove_proxies(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<String>, Box<dyn Error>> {
     let providers = vec![]; // result
     let event_bus = EventBus::new();
     let mut found_providers = vec![]; // list of peer id 
