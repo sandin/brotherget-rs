@@ -47,7 +47,7 @@ impl Default for Config {
 impl Config {
 
   pub async fn load_from_file(filename: &str) -> Result<Config, BError> {
-    if !Path::new(filename).to_path_buf().exists() {
+    if !Path::new(filename).exists() {
       return Err(BError::Config(format!("Error: config file is missing.")));
     }
   

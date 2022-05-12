@@ -37,6 +37,10 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
   let mut requestes: Vec<DownloadRequest> = vec![];
   let (support_range, content_length) = head(url.clone()).await?;
   if support_range && proxies.len() > 0 {
+    let mut proxies = proxies.clone();
+    // The empty string means that no proxy is used and the download directly from the local machine
+    proxies.push(String::from("")); 
+
     let chunk_count: u32 = proxies.len() as u32;
     let chunk_size: u64 = (content_length as f64 / chunk_count as f64).ceil() as u64;
     let last_chunk_size: u64 = if content_length % chunk_size == 0 { chunk_size } else { content_length % chunk_size };
@@ -56,7 +60,7 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
         range: Some((offset, end)),
         size: (end - offset + 1), // bytes range = [offset, end]
         filename: format!("{}.part{}", filename, i),
-        proxy_url: Some(proxy.clone()),
+        proxy_url: if !proxy.is_empty() { Some(proxy.clone()) } else { None },
         proxy_name: proxy, // TODO
       });
 
@@ -197,13 +201,33 @@ pub async fn merge_files(requests: Vec<DownloadRequest>, output_filename: String
   Ok(())
 }
 
+// cargo test -- --nocapture test_download_file
+#[tokio::test()]
+async fn test_download_file() {
+  let urls = vec![
+    // url, SHA256, file size
+    ("https://dl.google.com/go/go1.18.1.windows-amd64.msi", "9a3e9636eb5f9af4b3b29b116b7d28b8d6092c690ee4b88cfb9613b8851d4a66", 138891264), // 132MB
+    ("https://golang.google.cn/dl/go1.18.1.src.tar.gz", "efd43e0f1402e083b73a03d444b7b6576bb4c539ac46208b63a916b69aca4088", 22834149), // 22MB
+  ];
 
-// refs:
-// https://rust-lang-nursery.github.io/rust-cookbook/web/clients/download.html
-// https://github.com/console-rs/indicatif/blob/main/examples/multi.rs
+  // using empty string as proxies will not use any proxies,
+  // but will force chunked downloads.
+  // TODO: perhaps we will later use `HTTP_PROXY` env as real http proxies to test
+  let no_proxy = String::from("");
+  let proxies = vec![ 
+    no_proxy.clone(),
+    no_proxy.clone(),
+    no_proxy.clone(),
+    no_proxy.clone(),
+  ]; 
+  for (url, checksum, file_size) in urls {
+    let filename = download_file(String::from(url), proxies.clone()).await.unwrap();
+    println!("filename {}", filename);
+    let filepath = std::path::Path::new(&filename);
+    assert!(filepath.exists());
+    assert_eq!(filepath.metadata().unwrap().len(), file_size);
+    // TODO: assert_eq!(checksum, sha256sum(filename));
 
-// TODO:
-// test
-//let url = "https://releases.ubuntu.com/22.04/ubuntu-22.04-desktop-amd64.iso";
-//let url = "https://dl.google.com/go/go1.18.1.windows-amd64.msi"; // 132MB SHA256 Checksum: 9a3e9636eb5f9af4b3b29b116b7d28b8d6092c690ee4b88cfb9613b8851d4a66
-//let url = "https://golang.google.cn/dl/go1.18.1.src.tar.gz"; // 22MB SHA256 Checksum: efd43e0f1402e083b73a03d444b7b6576bb4c539ac46208b63a916b69aca4088
+    tokio::fs::remove_file(filename).await.unwrap();
+  }
+}

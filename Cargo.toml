@@ -9,19 +9,9 @@ edition = "2021"
 name = "bget"
 path = "src/main.rs"
 
-#[[bin]]
-#name = "bp2p"
-#path = "src/p2p.rs"
-#required-features = ["p2p"]
-
-#[[bin]]
-#name = "bsss"
-#path = "src/ssocks.rs"
-#required-features = ["ss"]
-
 [dependencies]
 reqwest = { version = "0.11", features = ["json", "stream"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "test-util"] }
 futures = "0.3.18"
 indicatif = "0.17.0-rc.10"
 clap = "2.33.0"

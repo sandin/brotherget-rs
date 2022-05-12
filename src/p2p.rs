@@ -395,36 +395,6 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
     //Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
-
-    let matches  = App::new("bp2p")
-    .version(env!("CARGO_PKG_VERSION"))
-    .arg(
-      Arg::with_name("bootnode")
-          .short("b")
-          .long("bootnode")
-          .takes_value(false)
-          .help("is bootnode"),
-    )
-    .arg(
-      Arg::with_name("peer").required(false).help("peer id")
-    )
-    .get_matches();
-
-    let key_file: String = String::from("private.pk8");
-    let bootnode_port: u32 = 53308;
-    let bootnodes: Vec<String> = vec![
-        String::from("/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"),
-    ];
-
-    let key_file = if matches.is_present("bootnode") { Some(key_file) } else { None };
-    let event_bus = EventBus::new();
-    join_p2p(key_file, bootnode_port, bootnodes.to_vec(), event_bus.clone()).await?;
-    Ok(())
-}
-
 fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String) {
     let mut args = line.split(' ');
 
@@ -514,4 +484,24 @@ fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String) {
             eprintln!("expected GET, GET_PROVIDERS, PUT or PUT_PROVIDER");
         }
     }
+}
+
+// RUST_LOG=DEBUG BOOTNODE=true  cargo test -- --nocapture test_join_p2p
+// RUST_LOG=DEBUG BOOTNODE=false cargo test -- --nocapture test_join_p2p
+#[tokio::test(start_paused = true)]
+async fn test_join_p2p() {
+    env_logger::init();
+
+    let key_file: String = String::from("private.pk8");
+    let bootnode_port: u32 = 53308;
+    let bootnodes: Vec<String> = vec![
+        String::from("/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"),
+    ];
+
+    let key_file = match std::env::var("BOOTNODE") {
+        Ok(_) => Some(key_file),
+        Err(_) => None,
+    };
+    let event_bus = EventBus::new();
+    join_p2p(key_file, bootnode_port, bootnodes.to_vec(), event_bus.clone()).await.unwrap();
 }

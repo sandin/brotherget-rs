@@ -2,6 +2,12 @@
 
 BrotherGet is a P2P downloader.
 
+## Build
+
+```
+$ cargo build --release
+```
+
 ## Usage
 
 ```
