@@ -37,11 +37,11 @@ pub async fn start_ssserver(config_str: Option<&str>, event_bus: EventBus) -> Re
     Ok(())
 }
 
-pub async fn start_sslocal(config_file: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
+pub async fn start_sslocal(config_str: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
     println!("start_sslocal");
 
-    let config: SSConfig::Config = match config_file {
-        Some(filename) => SSConfig::Config::load_from_file(filename, SSConfig::ConfigType::Local).unwrap(),
+    let config: SSConfig::Config = match config_str {
+        Some(content) => SSConfig::Config::load_from_str(content, SSConfig::ConfigType::Local).unwrap(),
         None => { 
             let config_content = r#"
                 {
@@ -59,6 +59,11 @@ pub async fn start_sslocal(config_file: Option<&str>, event_bus: EventBus) -> Re
     };
 
     println!("local proxy protocol: {:#?} addr: {:#?}", config.local[0].protocol, config.local[0].addr);
+    let addr = config.local[0].addr.as_ref().unwrap();
+    event_bus.sender.send(Event::ProxyStarted { 
+        addr: addr.host(),
+        port: addr.port() as u32, 
+    }).unwrap();
     let instance = create_local(config).await?;
     instance.wait_until_exit().await?;
     Ok(())

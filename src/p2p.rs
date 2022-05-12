@@ -3,9 +3,12 @@ use std::error::Error;
 use std::str::FromStr;
 use std::path::{Path};
 use std::net::Ipv4Addr;
+use std::time::{Duration, Instant};
 use clap::{Arg, App};
 use tokio::fs::{File};
+use tokio::sync::oneshot;
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 use tokio::io::{self, AsyncBufReadExt};
 use futures::StreamExt;
 use libp2p::{
@@ -31,6 +34,8 @@ use log;
 use env_logger;
 use crate::event::{Event, EventBus};
 
+pub const BGET_SERVER_KEY: &'static str = "bget";
+
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "OutEvent")]
 struct MyBehaviour {
@@ -55,6 +60,77 @@ impl From<KademliaEvent> for OutEvent {
     fn from(v: KademliaEvent) -> Self {
         Self::Kademlia(v)
     }
+}
+
+pub async fn find_providers(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<String>, Box<dyn Error>> {
+    let providers = vec![]; // result
+    let event_bus = EventBus::new();
+    let mut found_providers = vec![]; // list of peer id 
+    let mut found_proxies = vec![];   // list of proxy url
+
+    let event_bus1 = event_bus.clone();
+    tokio::spawn(async move {
+        join_p2p(keyfile, port, bootnodes, event_bus1.clone()).await.unwrap();
+        event_bus1.sender.send(Event::PeerStoped).unwrap();
+    });
+
+    let timeout_f = sleep(timeout); // future
+    let rx = event_bus.receiver;
+
+    tokio::pin!(timeout_f);
+    tokio::pin!(rx);
+
+    // STATE MACHINE:
+    //         Idle 
+    //           |   join_p2p() 
+    //           v
+    //      PeerStarted
+    //           |   post_event(GetProviders) // find peers
+    //           v
+    //    GetProvidersResult
+    //           |   post_event(GetRecord)    // find proxy url of each peer
+    //           v
+    //     GetRecordResult
+    //           |   break                    // got all we need
+    //           v
+    //       PeerStoped
+    loop {
+        tokio::select! {
+          e = rx.recv() => {
+            match e.unwrap() {
+              Event::PeerStarted { peer_id, addr, port } => {
+                println!("peer is ready, peer_id={}, addr={}, port={}", peer_id, addr, port);
+                event_bus.sender.send(Event::GetProviders { key: String::from(BGET_SERVER_KEY) }).unwrap();
+              },
+              Event::PeerStoped => {
+                println!("peer/proxy stoped");
+                break;
+              },
+              Event::GetProvidersResult { key, providers } => {
+                println!("found providers(key={}): {:#?}", &key, providers);
+                for provider in providers {
+                    found_providers.push(provider.clone());
+                    event_bus.sender.send(Event::GetRecord { key: provider.clone() }).unwrap();
+                }
+              },
+              Event::GetRecordResult { key, value } => {
+                println!("found record: peer_id={}, proxy_url={}", &key, &value);
+                found_proxies.push(value);
+                if found_providers.len() == found_proxies.len() {
+                    break; // got all we need
+                }
+              },
+              _ => {}
+            }
+          },
+          _ = &mut timeout_f => {
+            eprintln!("find providers timeout");
+            break;
+          },
+        }
+    }
+
+    Ok(providers)
 }
 
 pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {

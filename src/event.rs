@@ -43,6 +43,14 @@ pub enum Event {
         key: String,
         value: String,
     },
+
+    // download events
+    DownloadSuccessed {
+        filename: String,
+    },
+    DownloadFailed {
+        error: String,
+    },
 }
 
 /// There are many asynchronous components that need to communicate with each other,

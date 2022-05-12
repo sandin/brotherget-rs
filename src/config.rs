@@ -5,21 +5,22 @@ use tokio::fs::{File};
 use tokio::io::{AsyncReadExt};
 use crate::error::BError;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProxyConfig {
   pub local_port: u32,  // port of sslocal
+  pub server: String,   // addr of ssserver
   pub server_port: u32, // port of ssserver
   pub password: String, // password of sserver and sslocal
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct P2pConfig {
   pub peer_port: u32, // port of p2p
   pub key_file: Option<String>, // keyfile of p2p
   pub bootnodes: Vec<String>, // bootnodes of p2p
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
   pub proxy: ProxyConfig,
   pub p2p: P2pConfig,
@@ -30,6 +31,7 @@ impl Default for Config {
     Config {
       proxy: ProxyConfig {
         local_port: 1081,
+        server: String::from("0.0.0.0"),
         server_port: 8383, 
         password: String::from("foo!bar!"),
       },
