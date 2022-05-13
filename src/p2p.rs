@@ -63,11 +63,10 @@ impl From<KademliaEvent> for OutEvent {
 }
 
 pub async fn find_remove_proxies(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<String>, Box<dyn Error>> {
-    let providers = vec![]; // result
-    let event_bus = EventBus::new();
     let mut found_providers = vec![]; // list of peer id 
     let mut found_proxies = vec![];   // list of proxy url
 
+    let event_bus = EventBus::new();
     let event_bus1 = event_bus.clone();
     tokio::spawn(async move {
         join_p2p(keyfile, port, bootnodes, event_bus1.clone()).await.unwrap();
@@ -117,6 +116,7 @@ pub async fn find_remove_proxies(keyfile: Option<String>, port: u32, bootnodes: 
                 println!("found record: peer_id={}, proxy_url={}", &key, &value);
                 found_proxies.push(value);
                 if found_providers.len() == found_proxies.len() {
+                    println!("found all proxies: {:#?}", found_proxies);
                     break; // got all we need
                 }
               },
@@ -130,7 +130,7 @@ pub async fn find_remove_proxies(keyfile: Option<String>, port: u32, bootnodes: 
         }
     }
 
-    Ok(providers)
+    Ok(found_proxies)
 }
 
 pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {

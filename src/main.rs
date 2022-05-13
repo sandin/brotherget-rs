@@ -18,7 +18,7 @@ use env_logger;
 use crate::error::BError;
 use crate::config::Config;
 use crate::download::{download_file};
-use crate::ssocks::{start_ssserver, start_sslocal, get_random_available_port};
+use crate::ssocks::{run_ssserver, run_sslocal, get_random_available_port};
 use crate::p2p::{join_p2p, find_remove_proxies, BGET_SERVER_KEY};
 use crate::event::{Event, EventBus};
 
@@ -89,7 +89,7 @@ async fn start_server(config: Config) -> Result<(), BError> {
     // rust raw string literals do not support placeholder, use string replace instead
     let config_content = config_content.replace("{server_port}", &port.to_string());  
     let config_content = config_content.replace("{password}", &config.proxy.password);
-    start_ssserver(Some(&config_content), event_bus1.clone()).await.unwrap();
+    run_ssserver(Some(&config_content), event_bus1.clone()).await.unwrap();
     event_bus1.sender.send(Event::ProxyStoped).unwrap();
   });
 
@@ -203,7 +203,7 @@ async fn download_url(url: String, config: Config) -> Result<(), BError> {
     local_proxy_handles.push(tokio::spawn(async move {
       let config_content = r#"
       {
-        "server": "{server_addr}",
+        "server": "{server}",
         "server_port": {server_port},
         "password": "{password}",
         "method": "aes-256-gcm",
@@ -221,8 +221,9 @@ async fn download_url(url: String, config: Config) -> Result<(), BError> {
       let config_content = config_content.replace("{server_port}", &sslocal_config.server_port.to_string());  
       let config_content = config_content.replace("{password}", &sslocal_config.password);
       let config_content = config_content.replace("{local_port}", &local_port.to_string());
+      println!("run local proxy: {}", &config_content);
 
-      start_sslocal(Some(&config_content), event_bus.clone()).await.unwrap();
+      run_sslocal(Some(&config_content), event_bus.clone()).await.unwrap();
       event_bus.sender.send(Event::ProxyStoped).unwrap();
     }));
   }

@@ -9,8 +9,8 @@ pub async fn get_random_available_port() -> Result<u32, Box<dyn Error>> {
     Ok(port)
 }
 
-pub async fn start_ssserver(config_str: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
-    println!("start_ssserver");
+pub async fn run_ssserver(config_str: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
+    println!("run_ssserver");
 
     let config: SSConfig::Config = match config_str {
         Some(content) => SSConfig::Config::load_from_str(content, SSConfig::ConfigType::Server).unwrap(),
@@ -26,8 +26,8 @@ pub async fn start_ssserver(config_str: Option<&str>, event_bus: EventBus) -> Re
     Ok(())
 }
 
-pub async fn start_sslocal(config_str: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
-    println!("start_sslocal");
+pub async fn run_sslocal(config_str: Option<&str>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
+    println!("run_sslocal");
 
     let config: SSConfig::Config = match config_str {
         Some(content) => SSConfig::Config::load_from_str(content, SSConfig::ConfigType::Local).unwrap(),
@@ -52,9 +52,9 @@ async fn test_get_random_available_port() {
     assert!(port > 0);
 }
 
-// cargo test -- --nocapture test_start_ssserver
+// cargo test -- --nocapture test_run_ssserver
 #[tokio::test(start_paused = true)]
-async fn test_start_ssserver() {
+async fn test_run_ssserver() {
     let event_bus = EventBus::new();
     let config = r#"
         {
@@ -64,12 +64,12 @@ async fn test_start_ssserver() {
             "method": "aes-256-gcm"
         }
     "#;
-    start_ssserver(Some(config), event_bus.clone()).await.unwrap();
+    run_ssserver(Some(config), event_bus.clone()).await.unwrap();
 }
 
-// cargo test -- --nocapture test_start_sslocal
+// cargo test -- --nocapture test_run_sslocal
 #[tokio::test(start_paused = true)]
-async fn test_start_sslocal() {
+async fn test_run_sslocal() {
     let event_bus = EventBus::new();
     let config = r#"
     {
@@ -82,5 +82,5 @@ async fn test_start_sslocal() {
         "local_port": 1093
     }
     "#;
-    start_sslocal(Some(config), event_bus.clone()).await.unwrap();
+    run_sslocal(Some(config), event_bus.clone()).await.unwrap();
 }
