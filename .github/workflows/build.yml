@@ -1,0 +1,45 @@
+name: Rust
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux-ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build
+      run: cargo build --release --verbose
+    - name: publish artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: bget_linux
+        path: target/release/bget
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build
+      run: cargo build --release --verbose
+    - name: publish artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: bget.exe
+        path: target/release/bget.exe
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build
+      run: cargo build --release --verbose
+    - name: publish artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: bget_macos
+        path: target/release/bget
