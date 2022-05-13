@@ -106,11 +106,12 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
           request_copy.proxy_name = String::from("");
         }
 
+        let proxy_url = request_copy.proxy_url.clone();
         res = download_partial(request_copy, &progress_bar).await;
         if res.is_ok() {
           return res; // break with success response
         } else {
-          multi_progress.println(format!("error: {}, retry: {}", res.as_ref().err().unwrap().to_string(), retry)).unwrap();
+          multi_progress.println(format!("error: {}, proxy: {:#?}, retry: {}", res.as_ref().err().unwrap().to_string(), proxy_url, retry)).unwrap();
           progress_bar.finish();
           sleep(Duration::from_secs(3)).await;
         }

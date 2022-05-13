@@ -62,7 +62,7 @@ impl From<KademliaEvent> for OutEvent {
     }
 }
 
-pub async fn find_remove_proxies(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<String>, Box<dyn Error>> {
+pub async fn find_remote_proxies(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<String>, Box<dyn Error>> {
     let mut found_providers = vec![]; // list of peer id 
     let mut found_proxies = vec![];   // list of proxy url
 
@@ -109,6 +109,7 @@ pub async fn find_remove_proxies(keyfile: Option<String>, port: u32, bootnodes: 
                 println!("found providers(key={}): {:#?}", &key, providers);
                 for provider in providers {
                     found_providers.push(provider.clone());
+                    // TODO: ping the peer
                     event_bus.sender.send(Event::GetRecord { key: provider.clone() }).unwrap();
                 }
               },
@@ -129,6 +130,8 @@ pub async fn find_remove_proxies(keyfile: Option<String>, port: u32, bootnodes: 
           },
         }
     }
+
+    // TODO: filter the proxy urls
 
     Ok(found_proxies)
 }
