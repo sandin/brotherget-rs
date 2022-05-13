@@ -1,16 +1,17 @@
 use std::io::SeekFrom;
-use std::time::{Instant};
+use std::time::{Instant, Duration};
 use indicatif::{MultiProgress, ProgressStyle, ProgressBar, HumanBytes};
 use futures::future::join_all;
 use futures::StreamExt;
 use tokio::fs::{remove_file, File};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, AsyncReadExt};
+use tokio::time::sleep;
 use reqwest::header::{ACCEPT_RANGES, CONTENT_LENGTH, RANGE};
 use reqwest::Response;
 use reqwest::StatusCode;
 use crate::error::BError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DownloadRequest {
   pub url: String,
   pub range: Option<(u64, u64)>,
@@ -20,6 +21,8 @@ pub struct DownloadRequest {
   pub proxy_name: String,
 }
 type DownloadResponse = DownloadRequest;
+
+const MAX_RETRIES: u16 = 6;
 
 pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, BError> {
   let multi_progress = MultiProgress::new();
@@ -85,11 +88,35 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
  
   let mut handles = vec![];
   for request in requestes {
-    let progress_bar = multi_progress.add(ProgressBar::new(request.size));
-    progress_bar.set_style(progress_style.clone());
-    progress_bar.set_message(request.filename.clone());
+    let multi_progress = multi_progress.clone(); // -> move
+    let progress_size = request.size;
+    let progress_style = progress_style.clone();
+    let progress_message = request.filename.clone();
+    handles.push(tokio::spawn(async move { 
+      let mut res = Err(BError::Download(String::from("unknown error")));
+      for retry in 0..MAX_RETRIES {
+        let progress_bar = multi_progress.add(ProgressBar::new(progress_size));
+        progress_bar.set_style(progress_style.clone());
+        progress_bar.set_message(progress_message.clone());
 
-    handles.push(tokio::spawn(download_partial(request, multi_progress.clone(), progress_bar)));
+        let mut request_copy = request.clone();
+        if retry >= (MAX_RETRIES / 2) {
+          // maybe this proxy server has been shutdown, we download directly without it
+          request_copy.proxy_url = None;
+          request_copy.proxy_name = String::from("");
+        }
+
+        res = download_partial(request_copy, &progress_bar).await;
+        if res.is_ok() {
+          return res; // break with success response
+        } else {
+          multi_progress.println(format!("error: {}, retry: {}", res.as_ref().err().unwrap().to_string(), retry)).unwrap();
+          progress_bar.finish();
+          sleep(Duration::from_secs(3)).await;
+        }
+      }
+      return res; // the last error
+    }));
   }
   
   // Let's wait
@@ -120,8 +147,9 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
   Ok(filename)
 }
 
-pub async fn download_partial(request: DownloadRequest, _: MultiProgress, progress_bar: ProgressBar) -> Result<DownloadRequest, BError> {
+pub async fn download_partial(request: DownloadRequest, progress_bar: &ProgressBar) -> Result<DownloadRequest, BError> {
   let mut output_file = File::create(&request.filename).await?;
+  // TODO: check whether this file exists, if exists use it and seek to the end, continue to download the rest of the file
 
   let builder = reqwest::Client::builder();
   let mut agent_name = String::from("localhost");
@@ -163,7 +191,7 @@ pub async fn download_partial(request: DownloadRequest, _: MultiProgress, progre
   //println!("downloaded url={}, filename={}", &request.url, &request.filename);
   progress_bar.finish_with_message("done");
 
-  Ok(request)
+  Ok(request) // request as response
 }
 
 pub async fn head(url: String) -> Result<(bool, u64), BError> {

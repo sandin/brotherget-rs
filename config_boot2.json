@@ -9,8 +9,8 @@
         "peer_port": 53309,
         "key_file": "private_DkP9.pk8",
         "bootnodes": [
-            "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa",
-            "/ip4/127.0.0.1/tcp/53309/p2p/QmckweETKF3ncFQRYYwbbBHZRH6RhqPkG3sCjF5E68DkP9"
+            "/ip4/10.11.64.68/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa",
+            "/ip4/10.11.251.117/tcp/53309/p2p/QmckweETKF3ncFQRYYwbbBHZRH6RhqPkG3sCjF5E68DkP9"
         ]
     }
 }

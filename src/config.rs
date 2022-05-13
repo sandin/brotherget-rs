@@ -30,15 +30,18 @@ impl Default for Config {
   fn default() -> Self {
     Config {
       proxy: ProxyConfig {
-        local_port: 1081,
+        local_port: 0,
         server: String::from("0.0.0.0"),
-        server_port: 8383, 
-        password: String::from("foo!bar!"),
+        server_port: 0, 
+        password: String::from("mMVlD2/6lni6EX6l5Tx3khJcl7Y="),
       },
       p2p: P2pConfig {
-        peer_port: 53308,
+        peer_port: 0,
         key_file: None,
-        bootnodes: vec![],
+        bootnodes: vec![
+          String::from("/ip4/10.11.64.68/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"),
+          String::from("/ip4/10.11.251.117/tcp/53309/p2p/QmckweETKF3ncFQRYYwbbBHZRH6RhqPkG3sCjF5E68DkP9")
+        ],
       }
     }
   }
