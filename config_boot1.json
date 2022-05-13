@@ -6,10 +6,11 @@
         "local_port": 0
     },
     "p2p": {
-        "peer_port": 0,
+        "peer_port": 53308,
+        "key_file": "private_UUxa.pk8",
         "bootnodes": [
             "/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa",
-            "/ip4/127.0.0.1/tcp/53308/p2p/QmckweETKF3ncFQRYYwbbBHZRH6RhqPkG3sCjF5E68DkP9"
+            "/ip4/127.0.0.1/tcp/53309/p2p/QmckweETKF3ncFQRYYwbbBHZRH6RhqPkG3sCjF5E68DkP9"
         ]
     }
 }

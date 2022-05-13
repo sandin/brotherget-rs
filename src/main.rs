@@ -13,7 +13,7 @@ use clap::{Arg, App};
 use tokio::signal;
 use tokio::sync::broadcast::error::SendError;
 use tokio::time::sleep;
-use env_logger;
+use env_logger::{self, Env};
 
 use crate::error::BError;
 use crate::config::Config;
@@ -289,21 +289,33 @@ async fn download_url(url: String, config: Config) -> Result<(), BError> {
 
 #[tokio::main]
 async fn main() -> Result<(), BError> {
-  env_logger::init();
-
   let matches  = App::new("bget")
     .version(env!("CARGO_PKG_VERSION"))
     .about("BrotherGet is a P2P downloader.")
     .arg(
       Arg::with_name("config")
+          .short("c")
           .long("config")
           .takes_value(true)
           .help("config json file"),
     )
     .arg(
+      Arg::with_name("verbose")
+          .short("v")
+          .long("verbose")
+          .takes_value(false)
+          .help("enable debug log"),
+    )
+    .arg(
       Arg::with_name("url").help("url")
     )
     .get_matches();
+
+  if matches.is_present("verbose") {
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+  } else {
+    env_logger::init();
+  }
 
   let config: Config = match matches.value_of("config") {
     Some(filename) => Config::load_from_file(filename).await.expect(&format!("can not parse config file {}", filename)),

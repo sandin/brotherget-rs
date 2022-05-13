@@ -492,7 +492,7 @@ fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String) {
 async fn test_join_p2p() {
     env_logger::init();
 
-    let key_file: String = String::from("private.pk8");
+    let key_file: String = String::from("private_UUxa.pk8");
     let bootnode_port: u32 = 53308;
     let bootnodes: Vec<String> = vec![
         String::from("/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"),
