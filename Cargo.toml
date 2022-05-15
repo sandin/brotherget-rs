@@ -17,10 +17,14 @@ indicatif = "0.17.0-rc.10"
 clap = "2.33.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-libp2p = { version = "0.44.0", features = ["default", "tcp-tokio"], optional = true }
+libp2p = { version = "0.44.0", features = ["identify", "kad", "mplex", "noise", "ping", "tcp-tokio"], optional = true }
 log = "0.4.0"
 env_logger = "0.8.4"
-shadowsocks-service = { version = "1.14.3", features = ["full"], optional = true }
+shadowsocks-service = { version = "1.14.3", features = ["local", "server", "local-http"], optional = true }
+prost = "0.10"
+
+[build-dependencies]
+prost-build = "0.10"
 
 [features]
 default = ["bget", "p2p", "ss"]

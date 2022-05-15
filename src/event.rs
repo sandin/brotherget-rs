@@ -34,14 +34,17 @@ pub enum Event {
     },
     PutRecord {
         key: String,
-        value: String,
+        value: Vec<u8>,
+    },
+    PutRecordResult {
+        success: bool,
     },
     GetRecord {
         key: String,
     },
     GetRecordResult {
         key: String,
-        value: String,
+        value: Vec<u8>,
     },
 
     // download events

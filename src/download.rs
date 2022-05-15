@@ -113,7 +113,11 @@ pub async fn download_file(url: String, proxies: Vec<String>) -> Result<String, 
         } else {
           multi_progress.println(format!("error: {}, proxy: {:#?}, retry: {}", res.as_ref().err().unwrap().to_string(), proxy_url, retry)).unwrap();
           progress_bar.finish();
-          sleep(Duration::from_secs(3)).await;
+          if request.proxy_url.is_none() { 
+            // fastfail when use proxy, if the proxy server is offline, it is offline. no need to give it chance to restore the network,
+            // only if it is direct local download, sleep a litte bit to wait for the network to resume.
+            sleep(Duration::from_secs(3)).await;
+          }
         }
       }
       return res; // the last error

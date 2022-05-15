@@ -5,6 +5,7 @@ mod config;
 mod download;
 mod ssocks;
 mod p2p;
+mod service;
 mod event;
 
 use std::process;
@@ -20,7 +21,8 @@ use crate::error::BError;
 use crate::config::Config;
 use crate::download::{download_file};
 use crate::ssocks::{run_ssserver, run_sslocal, get_random_available_port};
-use crate::p2p::{join_p2p, find_remote_proxies, BGET_SERVER_KEY};
+use crate::p2p::{join_p2p, discover_p2p_services};
+use crate::service::{P2PService, SSProxyService};
 use crate::event::{Event, EventBus};
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,7 @@ struct Context {
 
   proxy_addr: Option<String>,
   proxy_port: Option<u32>,
+  proxy_password: Option<String>,
 
   peer_id: Option<String>,
   peer_addr: Option<String>,
@@ -36,6 +39,8 @@ struct Context {
 
   url: Option<String>,
   local_proxies: Vec<String>,
+
+  pending_exit: bool,
 }
 
 impl Default for Context {
@@ -45,6 +50,7 @@ impl Default for Context {
 
       proxy_addr: None,
       proxy_port: None,
+      proxy_password: None,
 
       peer_id: None,
       peer_addr: None,
@@ -52,6 +58,8 @@ impl Default for Context {
 
       url: None,
       local_proxies: vec![],
+
+      pending_exit: false,
     }
   }
 }
@@ -70,7 +78,10 @@ impl Context {
 }
 
 async fn start_server(config: Config) -> Result<(), BError> {
-  let context = Context::default();
+  let mut context = Context { 
+    proxy_password: Some(config.proxy.password.clone()),
+    ..Default::default()
+  };
 
   // proxy server
   let event_bus1 = context.event_bus.clone();
@@ -102,15 +113,21 @@ async fn start_server(config: Config) -> Result<(), BError> {
   });
 
   fn on_ready(context: &Context) {
-    let proxy_url = format!("{}:{}", context.peer_addr.as_ref().unwrap(), context.proxy_port.unwrap());
-    context.post_event(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: proxy_url }).unwrap();
-    context.post_event(Event::StartProviding { key: String::from(BGET_SERVER_KEY) }).unwrap();
-    context.post_event(Event::GetProviders { key: String::from(BGET_SERVER_KEY) }).unwrap();
+    let mut service: SSProxyService = SSProxyService::default();
+    service.info.addr = context.peer_addr.as_ref().unwrap().clone();
+    service.info.port = context.proxy_port.unwrap() as i32;
+    service.info.password = context.proxy_password.as_ref().unwrap().clone();
+
+    let service_key = format!("{}_{}", service.service_name(), context.peer_id.as_ref().unwrap());
+    context.post_event(Event::PutRecord { key: service_key, value: service.serialize() }).unwrap();
+    context.post_event(Event::StartProviding { key: SSProxyService::default().service_name() }).unwrap();
+    context.post_event(Event::GetProviders { key: SSProxyService::default().service_name() }).unwrap();
   }
 
-  fn on_exit(context: &Context) {
-    context.post_event(Event::PutRecord { key: context.peer_id.as_ref().unwrap().clone(), value: String::from("") }).unwrap();
-    process::exit(0);
+  fn on_exit(context: &mut Context) {
+    let service_key = format!("{}_{}", SSProxyService::default().service_name(), context.peer_id.as_ref().unwrap());
+    context.post_event(Event::PutRecord { key: service_key, value: vec![] }).unwrap(); // TODO: wait for it
+    context.pending_exit = true; // graceful exit
   }
 
   // STATE MACHINE:
@@ -156,7 +173,13 @@ async fn start_server(config: Config) -> Result<(), BError> {
           },
           Event::PeerStoped | Event::ProxyStoped => {
             println!("peer/proxy stoped");
-            on_exit(&context);
+            on_exit(&mut context);
+          },
+          Event::PutRecordResult { success } => {
+            if context.pending_exit {
+              println!("graceful exit");
+              process::exit(if success { 0 } else { -1 });
+            }
           },
           Event::GetProvidersResult { key, providers } => {
             println!("found providers(key={}): {:#?}", &key, providers);
@@ -165,15 +188,14 @@ async fn start_server(config: Config) -> Result<(), BError> {
             }
           },
           Event::GetRecordResult { key, value } => {
-            println!("found record: peer_id={}, proxy_url={}", &key, &value);
+            println!("found record: peer_id={}, service={:#?}", &key, value);
           },
           _ => {}
         }
       },
       _ = signal::ctrl_c() => {
         println!("exit by canceled");
-        on_exit(&context);
-       
+        on_exit(&mut context);
       },
     }
   }
@@ -189,17 +211,18 @@ async fn download_url(url: String, config: Config) -> Result<(), BError> {
   // finding peers that provide proxy services on a private P2P network,
   // these brothers will share their bandwidth to speed up our downloads.
   let timeout = Duration::from_secs(5 * 60);
-  let remote_proxies: Vec<String> = find_remote_proxies(config.p2p.key_file, config.p2p.peer_port, config.p2p.bootnodes, timeout).await.unwrap();
-  println!("found proxies: {:#?}", remote_proxies);
+  let remote_proxy_services: Vec<SSProxyService> = discover_p2p_services(SSProxyService::default().service_name(), config.p2p.key_file, config.p2p.peer_port, config.p2p.bootnodes, timeout).await.unwrap();
+  let remote_proxy_services = remote_proxy_services.into_iter().filter(|s| s.info.addr.len() > 0 && s.info.port != 0).collect::<Vec<SSProxyService>>();
+  println!("found proxy services: {:#?}", remote_proxy_services);
 
   // use `sslocal` to connect to each proxy servers that use `ssserver`
   // running on the brother peers, and run http/socks5 proxy locally.
   let mut local_proxy_handles = vec![];
-  for proxy_addr in remote_proxies.iter() {
+  for proxy_service in remote_proxy_services.iter() {
     let mut sslocal_config = config.proxy.clone();
-    let (server, port) = proxy_addr.split_once(":").unwrap();
-    sslocal_config.server = String::from(server);
-    sslocal_config.server_port = String::from(port).parse().unwrap();
+    sslocal_config.server = proxy_service.info.addr.clone();
+    sslocal_config.server_port = proxy_service.info.port as u32;
+    sslocal_config.password = proxy_service.info.password.clone();
     let event_bus = context.event_bus.clone();
     local_proxy_handles.push(tokio::spawn(async move {
       let config_content = r#"
@@ -257,7 +280,7 @@ async fn download_url(url: String, config: Config) -> Result<(), BError> {
           Event::ProxyStarted { addr, port } => {
             println!("proxy is ready, addr={}, port={}", addr, port);
             context.local_proxies.push(format!("{}:{}", addr, port));
-            if context.local_proxies.len() == remote_proxies.len() {
+            if context.local_proxies.len() == remote_proxy_services.len() {
               on_ready(&context);
             }
           },

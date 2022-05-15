@@ -2,6 +2,15 @@
 
 BrotherGet is a P2P downloader.
 
+# Requirement
+
+* [protobuf](https://grpc.io/docs/protoc-installation/)
+
+install protobuf on macOS:
+```
+$ brew install protobuf
+```
+
 ## Build
 
 ```

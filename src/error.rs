@@ -7,6 +7,7 @@ pub enum BError {
     Config(std::string::String),
     Proxy(std::string::String),
     Download(std::string::String),
+    Proto(std::string::String),
     Other(std::string::String),
 }
 
@@ -19,6 +20,7 @@ impl std::fmt::Display for BError {
             BError::Config(ref cause) => write!(f, "Error: {}", cause),
             BError::Proxy(ref cause) => write!(f, "Error: {}", cause),
             BError::Download(ref cause) => write!(f, "Error: {}", cause),
+            BError::Proto(ref cause) => write!(f, "Error: {}", cause),
             BError::Other(ref cause) => write!(f, "Unknown error: {}!", cause),
         }
     }
@@ -45,5 +47,11 @@ impl From<reqwest::header::ToStrError> for BError {
 impl From<tokio::task::JoinError> for BError {
     fn from(error: tokio::task::JoinError) -> Self {
         BError::Tokio(error.to_string())
+    }
+}
+
+impl From<prost::DecodeError> for BError {
+    fn from(error: prost::DecodeError) -> Self {
+        BError::Proto(error.to_string())
     }
 }

@@ -3,6 +3,7 @@ use std::error::Error;
 use std::str::FromStr;
 use std::path::{Path};
 use std::net::Ipv4Addr;
+use std::fmt::Debug;
 use std::time::{Duration, Instant};
 use clap::{Arg, App};
 use tokio::fs::{File};
@@ -33,8 +34,8 @@ use libp2p::{
 use log;
 use env_logger;
 use crate::event::{Event, EventBus};
-
-pub const BGET_SERVER_KEY: &'static str = "bget";
+use crate::service::{P2PService, SSProxyService};
+use crate::error::BError;
 
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "OutEvent")]
@@ -62,9 +63,12 @@ impl From<KademliaEvent> for OutEvent {
     }
 }
 
-pub async fn find_remote_proxies(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<String>, Box<dyn Error>> {
+pub async fn discover_p2p_services<T>(service_name: String, keyfile: Option<String>, port: u32, bootnodes: Vec<String>, timeout: Duration) -> Result<Vec<T>, Box<dyn Error>> 
+    where T: P2PService + Debug + Default
+{
+    let mut found_services = vec![];  // list of p2p service
     let mut found_providers = vec![]; // list of peer id 
-    let mut found_proxies = vec![];   // list of proxy url
+    let mut provider_record_result_count = 0;
 
     let event_bus = EventBus::new();
     let event_bus1 = event_bus.clone();
@@ -99,7 +103,7 @@ pub async fn find_remote_proxies(keyfile: Option<String>, port: u32, bootnodes: 
             match e.unwrap() {
               Event::PeerStarted { peer_id, addr, port } => {
                 println!("peer is ready, peer_id={}, addr={}, port={}", peer_id, addr, port);
-                event_bus.sender.send(Event::GetProviders { key: String::from(BGET_SERVER_KEY) }).unwrap();
+                event_bus.sender.send(Event::GetProviders { key: service_name.clone() }).unwrap();
               },
               Event::PeerStoped => {
                 println!("peer/proxy stoped");
@@ -110,14 +114,26 @@ pub async fn find_remote_proxies(keyfile: Option<String>, port: u32, bootnodes: 
                 for provider in providers {
                     found_providers.push(provider.clone());
                     // TODO: ping the peer
-                    event_bus.sender.send(Event::GetRecord { key: provider.clone() }).unwrap();
+                    let service_info_key = format!("{}_{}", &service_name, &provider);
+                    event_bus.sender.send(Event::GetRecord { key: service_info_key }).unwrap();
                 }
               },
               Event::GetRecordResult { key, value } => {
-                println!("found record: peer_id={}, proxy_url={}", &key, &value);
-                found_proxies.push(value);
-                if found_providers.len() == found_proxies.len() {
-                    println!("found all proxies: {:#?}", found_proxies);
+                provider_record_result_count += 1;
+                let mut p2p_service = T::default();
+                match p2p_service.deserialize(value) {
+                    Ok(()) => {
+                        println!("found service: peer_id={}, service={:?}", &key, p2p_service);
+                        found_services.push(p2p_service);
+                    },
+                    Err(e) => {
+                        println!("found service: peer_id={}, error={}", &key, e.to_string());
+                    }
+                }
+
+                if found_providers.len() == provider_record_result_count {
+                    println!("found all proxies: {:#?}", found_services);
+                    event_bus.sender.send(Event::PeerStoped).unwrap();
                     break; // got all we need
                 }
               },
@@ -133,7 +149,7 @@ pub async fn find_remote_proxies(keyfile: Option<String>, port: u32, bootnodes: 
 
     // TODO: filter the proxy urls
 
-    Ok(found_proxies)
+    Ok(found_services)
 }
 
 pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>, event_bus: EventBus) -> Result<(), Box<dyn Error>> {
@@ -192,7 +208,7 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
     };
 
     // Read full lines from stdin
-    let mut stdin = io::BufReader::new(io::stdin()).lines();
+    //let mut stdin = io::BufReader::new(io::stdin()).lines();
 
     // Listen on all interfaces and whatever port the OS assigns
     let local_port = if is_boot_node { port } else {0};
@@ -226,7 +242,7 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
     // Kick it off
     loop {
         tokio::select! {
-            line = stdin.next_line() => handle_input_line(&mut swarm.behaviour_mut().kademlia, line.expect("Stdin not to close").unwrap()),
+            //line = stdin.next_line() => handle_input_line(&mut swarm.behaviour_mut().kademlia, line.expect("Stdin not to close").unwrap()),
             event = rx.recv() => {
                 match event? {
                     Event::StartProviding { key } => {
@@ -238,7 +254,7 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                     Event::PutRecord { key, value } => {
                         swarm.behaviour_mut().kademlia.put_record(Record {
                             key: Key::new(&key),
-                            value: value.as_bytes().to_vec(),
+                            value: value,
                             publisher: None,
                             expires: None,
                         }, Quorum::One).expect("Failed to store record locally.");
@@ -248,6 +264,9 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                     },
                     Event::GetProviders { key } => {
                         swarm.behaviour_mut().kademlia.get_providers(Key::new(&key));
+                    },
+                    Event::PeerStoped => {
+                        break;
                     },
                     _ => {},
                 }
@@ -353,11 +372,11 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                                                 log::debug!(
                                                     "Got record {:?} {:?}",
                                                     std::str::from_utf8(key.as_ref()).unwrap(),
-                                                    std::str::from_utf8(&value).unwrap(),
+                                                    value
                                                 );
                                                 tx.send(Event::GetRecordResult {
                                                     key: String::from_utf8(key.to_vec()).unwrap(),
-                                                    value: String::from_utf8(value.to_vec()).unwrap(),
+                                                    value: value,
                                                 }).unwrap();
                                             }
                                         }
@@ -369,9 +388,11 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
                                                 "Successfully put record {:?}",
                                                 std::str::from_utf8(key.as_ref()).unwrap()
                                             );
+                                            tx.send(Event::PutRecordResult { success: true }).unwrap();
                                         }
                                         QueryResult::PutRecord(Err(err)) => {
                                             eprintln!("Failed to put record: {:?}", err);
+                                            tx.send(Event::PutRecordResult { success: false }).unwrap();
                                         }
                                         QueryResult::StartProviding(Ok(AddProviderOk { key })) => {
                                             log::debug!(
@@ -395,7 +416,8 @@ pub async fn join_p2p(keyfile: Option<String>, port: u32, bootnodes: Vec<String>
             }
         }
     }
-    //Ok(())
+    println!("exit p2p");
+    Ok(())
 }
 
 fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String) {
@@ -507,4 +529,73 @@ async fn test_join_p2p() {
     };
     let event_bus = EventBus::new();
     join_p2p(key_file, bootnode_port, bootnodes.to_vec(), event_bus.clone()).await.unwrap();
+}
+
+// RUST_LOG=DEBUG cargo test -- --nocapture test_discover_p2p_services
+#[tokio::test]
+async fn test_discover_p2p_services() {
+    env_logger::init();
+
+    let key_file: String = String::from("private_UUxa.pk8");
+    let bootnode_port: u32 = 53308;
+    let bootnodes: Vec<String> = vec![
+        String::from("/ip4/127.0.0.1/tcp/53308/p2p/QmVN7pykS5HgjHSGS3TSWdGqmdBkhsSj1G5XLrTconUUxa"),
+    ];
+
+    let event_bus = EventBus::new();
+    let event_bus1 = event_bus.clone();
+    let key_file1 = key_file.clone();
+    let bootnodes1 = bootnodes.clone();
+    let handle = tokio::spawn(async move {
+        join_p2p(Some(key_file1), bootnode_port, bootnodes1.to_vec(), event_bus1.clone()).await.unwrap();
+        println!("end join_p2p");
+    });
+
+    fn on_ready(event_bus: &EventBus, key_file: &String, port: u32, bootnodes: &Vec<String>, peer_id: String, addr: String) {
+        let mut service: SSProxyService = SSProxyService::default();
+        service.info.addr = addr.clone();
+        service.info.port = 1080;
+        service.info.password = String::from("foo!bar!");
+    
+        let service_key = format!("{}_{}", service.service_name(), peer_id.clone());
+        event_bus.sender.send(Event::PutRecord { key: service_key, value: service.serialize() }).unwrap();
+        event_bus.sender.send(Event::StartProviding { key: SSProxyService::default().service_name() }).unwrap();
+
+        let service_name = service.service_name().clone();
+        let event_bus2 = event_bus.clone();
+        let key_file2 = key_file.clone();
+        let bootnodes2 = bootnodes.clone();
+        tokio::spawn(async move {
+            let remote_proxy_services: Vec<SSProxyService> = discover_p2p_services(service_name, None, 0, bootnodes2, Duration::from_secs(60)).await.unwrap();
+            println!("found proxy services: {:#?}", remote_proxy_services);
+            event_bus2.sender.send(Event::PeerStoped).unwrap();
+
+            assert!(remote_proxy_services.len() > 0);
+            assert!(remote_proxy_services[0].info.addr == addr);
+            assert!(remote_proxy_services[0].info.port as u32 == 1080);
+        });
+        println!("end on ready");
+    }
+
+    tokio::pin!(event_bus);
+    loop {
+        tokio::select! {
+            e = event_bus.receiver.recv() => {
+                match e.unwrap() {
+                    Event::PeerStarted { peer_id, addr, port } => {
+                        println!("peer is ready, peer_id={}, addr={}, port={}", peer_id, addr, port);
+                        on_ready(&event_bus, &key_file, port, &bootnodes, peer_id, addr);
+                    },
+                    Event::PeerStoped => {
+                        println!("peer is stoped");
+                        break;
+                    }
+                    _ => {},
+                }
+            }
+        }
+        println!("loop")
+    }
+    tokio::join!(handle);
+    println!("loop end")
 }
