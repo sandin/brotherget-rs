@@ -111,11 +111,17 @@ pub async fn discover_p2p_services<T>(service_name: String, keyfile: Option<Stri
               },
               Event::GetProvidersResult { key, providers } => {
                 println!("found providers(key={}): {:#?}", &key, providers);
-                for provider in providers {
-                    found_providers.push(provider.clone());
-                    // TODO: ping the peer
-                    let service_info_key = format!("{}_{}", &service_name, &provider);
-                    event_bus.sender.send(Event::GetRecord { key: service_info_key }).unwrap();
+                if providers.len() > 0 {
+                    for provider in providers {
+                        found_providers.push(provider.clone());
+                        // TODO: ping the peer
+                        let service_info_key = format!("{}_{}", &service_name, &provider);
+                        event_bus.sender.send(Event::GetRecord { key: service_info_key }).unwrap();
+                    }
+                } else {
+                    println!("found all proxies: {:#?}", found_services);
+                    event_bus.sender.send(Event::PeerStoped).unwrap();
+                    break; // got all we need
                 }
               },
               Event::GetRecordResult { key, value } => {

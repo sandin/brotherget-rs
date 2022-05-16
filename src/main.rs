@@ -343,14 +343,7 @@ async fn main() -> Result<(), BError> {
 
   let config: Config = match matches.value_of("config") {
     Some(filename) => Config::load_from_file(filename).await.expect(&format!("can not parse config file {}", filename)),
-    None => { 
-      let default_config = "config.json";
-      if Path::new(&default_config).exists() {
-        Config::load_from_file(&default_config).await.expect(&format!("can not parse config file {}", &default_config))
-      } else {
-        Config::default()
-      }
-    },
+    None => Config::default()
   };
 
   match matches.value_of("url") {

@@ -11,6 +11,9 @@ install protobuf on macOS:
 $ brew install protobuf
 ```
 
+install protobuf on windows:
+add path of 'protoc.exe' into PATH
+
 ## Build
 
 ```
